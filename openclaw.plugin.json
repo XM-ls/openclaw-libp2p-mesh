@@ -1,0 +1,63 @@
+{
+  "id": "libp2p-mesh",
+  "name": "libp2p Mesh Network",
+  "description": "P2P network for cross-instance agent communication via libp2p.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "listenAddrs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["/ip4/0.0.0.0/tcp/0"]
+      },
+      "enableWebSocket": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable WebSocket transport (useful for browser compatibility)"
+      },
+      "discovery": {
+        "type": "string",
+        "enum": ["mdns", "bootstrap", "dht"],
+        "default": "mdns"
+      },
+      "bootstrapList": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "meshTopic": {
+        "type": "string",
+        "default": "openclaw-mesh"
+      },
+      "enablePubsub": {
+        "type": "boolean",
+        "default": true
+      },
+      "enableAgentSync": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "uiHints": {
+    "listenAddrs": {
+      "label": "Listen Addresses",
+      "help": "libp2p listen multiaddrs (e.g. /ip4/0.0.0.0/tcp/0).",
+      "advanced": true
+    },
+    "discovery": {
+      "label": "Discovery Mechanism",
+      "help": "Peer discovery: mdns (LAN), bootstrap (static list), or dht (Kademlia)."
+    },
+    "bootstrapList": {
+      "label": "Bootstrap Peers",
+      "help": "Static bootstrap peer multiaddrs when discovery=bootstrap.",
+      "advanced": true
+    },
+    "meshTopic": {
+      "label": "Mesh Topic",
+      "help": "Default topic used for P2P broadcasts.",
+      "advanced": true
+    }
+  }
+}
