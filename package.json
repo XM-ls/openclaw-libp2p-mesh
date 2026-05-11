@@ -1,10 +1,16 @@
 {
-  "name": "@openclaw/libp2p-mesh",
-  "version": "2026.5.8",
+  "name": "openclaw-libp2p-mesh",
+  "version": "2026.5.11",
   "description": "OpenClaw libp2p P2P mesh network plugin for cross-instance agent communication",
   "type": "module",
-  "main": "index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
   "files": [
+    "dist",
     "index.ts",
     "api.ts",
     "src",
@@ -28,7 +34,8 @@
   },
   "devDependencies": {
     "openclaw": "^2026.5.7",
-    "tsx": "^4.0.0"
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.24"
@@ -40,7 +47,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "channel": {
       "id": "libp2p-mesh",
@@ -53,7 +60,7 @@
       "systemImage": "network"
     },
     "install": {
-      "npmSpec": "@openclaw/libp2p-mesh",
+      "npmSpec": "openclaw-libp2p-mesh",
       "defaultChoice": "npm",
       "minHostVersion": ">=2026.3.24"
     },
@@ -62,6 +69,16 @@
     },
     "release": {
       "publishToNpm": true
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "default": "./dist/api.js"
     }
   },
   "keywords": [
@@ -76,10 +93,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_USERNAME/openclaw-libp2p-mesh.git"
+    "url": "git+https://github.com/lilingfy/openclaw-libp2p-mesh.git"
   },
   "bugs": {
-    "url": "https://github.com/YOUR_USERNAME/openclaw-libp2p-mesh/issues"
+    "url": "https://github.com/lilingfy/openclaw-libp2p-mesh/issues"
   },
-  "homepage": "https://github.com/YOUR_USERNAME/openclaw-libp2p-mesh#readme"
+  "homepage": "https://github.com/lilingfy/openclaw-libp2p-mesh#readme"
 }

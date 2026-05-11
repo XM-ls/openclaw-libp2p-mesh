@@ -226,7 +226,7 @@ export function createMeshNetwork(options: {
     try {
       const { peerIdFromString } = await import("@libp2p/peer-id");
       logger?.debug?.(`[libp2p-mesh] dialProtocol to ${peerId}`);
-      const stream = await state.node.dialProtocol(peerIdFromString(peerId), PROTOCOL, {
+      const stream = await state.node.dialProtocol(peerIdFromString(peerId) as any, PROTOCOL, {
         signal: abortController.signal,
       });
       if (!stream) {
