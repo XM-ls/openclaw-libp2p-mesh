@@ -24,11 +24,19 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 openclaw install openclaw-libp2p-mesh
 ```
 
-### Method 2: Manual
+### Method 2: Manual (npm)
+
+如果无法通过 OpenClaw CLI 安装，可以手动安装到 managed npm root：
 
 ```bash
-cd ~/.openclaw/extensions
+cd ~/.openclaw/npm
 npm install openclaw-libp2p-mesh
+```
+
+然后刷新插件注册表：
+
+```bash
+openclaw plugins registry --refresh
 ```
 
 The published npm package includes compiled JavaScript under `dist/`, so OpenClaw and acpx can load it directly.
@@ -43,6 +51,11 @@ Then add to your `~/.openclaw/openclaw.json`:
       "config": {
         "discovery": "mdns"
       }
+    }
+  },
+  "channels": {
+    "libp2p-mesh": {
+      "enabled": true
     }
   }
 }
@@ -62,6 +75,11 @@ Add a `libp2p-mesh` block to your `openclaw.json` under `plugins`:
       "config": {
         "discovery": "mdns"
       }
+    }
+  },
+  "channels": {
+    "libp2p-mesh": {
+      "enabled": true
     }
   }
 }
@@ -83,6 +101,11 @@ By default, the node picks a random TCP port. To use a fixed port:
         "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"]
       }
     }
+  },
+  "channels": {
+    "libp2p-mesh": {
+      "enabled": true
+    }
   }
 }
 ```
@@ -102,6 +125,11 @@ If peers are on different networks, use a bootstrap node:
           "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
         ]
       }
+    }
+  },
+  "channels": {
+    "libp2p-mesh": {
+      "enabled": true
     }
   }
 }

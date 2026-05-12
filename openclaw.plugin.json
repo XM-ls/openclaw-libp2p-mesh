@@ -39,6 +39,7 @@
       }
     }
   },
+  "channels": ["libp2p-mesh"],
   "uiHints": {
     "listenAddrs": {
       "label": "Listen Addresses",

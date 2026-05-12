@@ -1,6 +1,6 @@
 {
   "name": "openclaw-libp2p-mesh",
-  "version": "2026.5.11",
+  "version": "2026.5.12",
   "description": "OpenClaw libp2p P2P mesh network plugin for cross-instance agent communication",
   "type": "module",
   "main": "dist/index.js",
