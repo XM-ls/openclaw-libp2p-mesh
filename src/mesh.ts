@@ -5,7 +5,7 @@ if (!Promise.withResolvers) {
     let reject: (reason?: unknown) => void;
     const promise = new Promise<T>((res, rej) => {
       resolve = res as typeof resolve;
-      reject = rej;
+      reject = rej as typeof reject;
     });
     return { promise, resolve: resolve!, reject: reject! };
   };
@@ -17,6 +17,7 @@ import path from "node:path";
 import { mdns } from "@libp2p/mdns";
 import { mplex } from "@libp2p/mplex";
 import { noise } from "@libp2p/noise";
+import { kadDHT } from "@libp2p/kad-dht";
 import {
   createEd25519PeerId,
   createFromProtobuf,
@@ -30,7 +31,12 @@ import { pipe } from "it-pipe";
 import { createLibp2p } from "libp2p";
 import { Uint8ArrayList } from "uint8arraylist";
 import type { Libp2p } from "libp2p";
-import type { MeshConfig, MeshNetwork, P2PMessage } from "./types.js";
+import type { MeshConfig, MeshNetwork, P2PMessage, InstanceIdentity } from "./types.js";
+import {
+  loadOrCreateInstanceIdentity,
+  verifyInstanceSignature,
+} from "./instance-id.js";
+import { registerPubkey, lookupPubkey } from "./dht-registry.js";
 
 const PROTOCOL = "/openclaw-msg/1.0.0";
 const MAX_SEEN_MESSAGES = 1000;
@@ -66,43 +72,72 @@ export function createMeshNetwork(options: {
   const config = options.config ?? {};
   const logger = options.logger;
 
-  // Use an object property instead of a bare `let` so all closures share
-  // the same mutable reference even if the bundler rewrites scopes.
   const state = {
     node: null as Libp2p | null,
+    instanceIdentity: null as InstanceIdentity | null,
+    signMessage: null as ((message: string) => string) | null,
   };
 
   const seenMessages = new Set<string>();
   const messageHandlers = new Set<(msg: P2PMessage) => void>();
   const topicHandlers = new Map<string, Set<(msg: string) => void>>();
 
+  function getDHTService(): ReturnType<typeof kadDHT> extends (components: infer C) => infer R ? R : never | undefined {
+    return (state.node as any)?.services?.dht;
+  }
+
   async function start(): Promise<void> {
+    // Load or create lightweight BAID-inspired instance identity
+    const instanceResult = await loadOrCreateInstanceIdentity({
+      name: config.instanceName,
+    });
+    state.instanceIdentity = instanceResult.identity;
+    state.signMessage = instanceResult.signMessage;
+
+    logger?.info?.(`[libp2p-mesh] Instance Identity: ${instanceResult.identity.id}`);
+    logger?.info?.(
+      `[libp2p-mesh] Bound to: ${instanceResult.identity.bindingComponents.username}@${instanceResult.identity.bindingComponents.hostname} (${instanceResult.identity.bindingComponents.platform})`,
+    );
+
     const peerId = await loadOrCreatePeerId(config.peerIdPath);
 
-    // Build transports dynamically
     const transports: any[] = [tcp()];
     if (config.enableWebSocket) {
       transports.push(webSockets());
     }
 
-    // Build peer discovery dynamically
+    // Peer discovery: mDNS for LAN, bootstrap for WAN entry points
     const peerDiscovery: any[] = [];
     const discoveryMechanism = config.discovery ?? "mdns";
+
     if (discoveryMechanism === "mdns") {
       peerDiscovery.push(mdns({ interval: 1000 }));
       logger?.info?.("[libp2p-mesh] Using mDNS discovery (LAN)");
-    } else if (discoveryMechanism === "bootstrap") {
+    }
+
+    if (discoveryMechanism === "bootstrap" || discoveryMechanism === "dht") {
       const bootstrapList = config.bootstrapList ?? [];
       if (bootstrapList.length > 0) {
         peerDiscovery.push(bootstrap({ list: bootstrapList }));
         logger?.info?.(`[libp2p-mesh] Using bootstrap discovery (${bootstrapList.length} node(s))`);
-      } else {
+      } else if (discoveryMechanism === "bootstrap") {
         logger?.warn?.("[libp2p-mesh] discovery=bootstrap but bootstrapList is empty; falling back to mDNS");
         peerDiscovery.push(mdns({ interval: 1000 }));
+      } else {
+        logger?.warn?.("[libp2p-mesh] discovery=dht but bootstrapList is empty; DHT may not find peers");
       }
-    } else if (discoveryMechanism === "dht") {
-      logger?.warn?.("[libp2p-mesh] DHT discovery is not yet implemented; falling back to mDNS");
-      peerDiscovery.push(mdns({ interval: 1000 }));
+    }
+
+    // Configure DHT for both WAN peer discovery and pubkey registry
+    const enableDHT = discoveryMechanism === "dht" || config.enableDHT !== false;
+    const services: Record<string, any> = {};
+    if (enableDHT) {
+      services.dht = kadDHT({
+        protocolPrefix: "/openclaw",
+        clientMode: false,
+        lan: false,
+      });
+      logger?.info?.("[libp2p-mesh] DHT enabled (protocol: /openclaw/kad/1.0.0)");
     }
 
     state.node = await createLibp2p({
@@ -115,6 +150,7 @@ export function createMeshNetwork(options: {
         listen: config.listenAddrs ?? ["/ip4/0.0.0.0/tcp/0"],
       },
       peerDiscovery,
+      services,
     });
 
     state.node.addEventListener("peer:connect", (evt) => {
@@ -151,14 +187,58 @@ export function createMeshNetwork(options: {
               }
               seenMessages.add(parsed.id);
 
-              // Enrich with local timestamp if missing
               if (!parsed.timestamp) {
                 parsed.timestamp = Date.now();
               }
 
-              logger?.debug?.(`[libp2p-mesh] Received ${parsed.type} from ${parsed.from}`);
+              // Verify instance identity signature if present
+              if (parsed.instanceId && parsed.signature) {
+                const dht = getDHTService();
+                if (dht) {
+                  // Reconstruct the signed payload
+                  const signedPayload = JSON.stringify({
+                    id: parsed.id,
+                    type: parsed.type,
+                    from: parsed.from,
+                    to: parsed.to,
+                    topic: parsed.topic,
+                    payload: parsed.payload,
+                    timestamp: parsed.timestamp,
+                    instanceId: parsed.instanceId,
+                  });
 
-              // Notify direct message handlers
+                  // Look up sender's pubkey from DHT
+                  const senderPubkey = await lookupPubkey(dht, parsed.instanceId, logger);
+
+                  if (senderPubkey) {
+                    const valid = verifyInstanceSignature(
+                      {
+                        id: parsed.instanceId,
+                        name: "",
+                        pubkey: senderPubkey,
+                        binding: "",
+                        bindingComponents: { username: "", hostname: "", platform: "" },
+                        createdAt: 0,
+                      },
+                      signedPayload,
+                      parsed.signature,
+                    );
+
+                    if (valid) {
+                      logger?.info?.(`[libp2p-mesh] Verified signature from instance ${parsed.instanceId}`);
+                    } else {
+                      logger?.warn?.(`[libp2p-mesh] Invalid signature from instance ${parsed.instanceId}`);
+                    }
+                  } else {
+                    logger?.warn?.(`[libp2p-mesh] No pubkey in DHT for instance ${parsed.instanceId}; skipping verification`);
+                  }
+                } else {
+                  logger?.debug?.(`[libp2p-mesh] DHT disabled; cannot verify signature from ${parsed.instanceId}`);
+                }
+              }
+
+              logger?.debug?.(`[libp2p-mesh] Received ${parsed.type} from ${parsed.from}${parsed.instanceId ? ` (instance: ${parsed.instanceId})` : ""}`);
+
               for (const handler of messageHandlers) {
                 try {
                   handler(parsed);
@@ -167,7 +247,6 @@ export function createMeshNetwork(options: {
                 }
               }
 
-              // Handle broadcast / topic subscription
               if (parsed.type === "broadcast" && parsed.topic) {
                 const handlers = topicHandlers.get(parsed.topic);
                 if (handlers) {
@@ -179,7 +258,6 @@ export function createMeshNetwork(options: {
                     }
                   }
                 }
-                // Flood-fill forward to other connected peers (with TTL guard)
                 await forwardBroadcast(parsed, connection.remotePeer.toString());
               }
             }
@@ -191,6 +269,34 @@ export function createMeshNetwork(options: {
     });
 
     await state.node.start();
+
+    // Wait for DHT routing table to populate before registering pubkey
+    if (enableDHT) {
+      const dht = getDHTService();
+      if (dht) {
+        let attempts = 0;
+        const maxAttempts = 30;
+        while (attempts < maxAttempts) {
+          const rtSize = (dht as any).routingTable?.size ?? 0;
+          const peerCount = state.node.getPeers().length;
+          if (rtSize > 0 || peerCount > 0) {
+            logger?.info?.(`[libp2p-mesh] DHT routing table ready (peers: ${peerCount}, rt: ${rtSize})`);
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+          attempts++;
+        }
+        if (attempts >= maxAttempts) {
+          logger?.warn?.(`[libp2p-mesh] DHT routing table still empty after ${maxAttempts}s; continuing anyway`);
+        }
+
+        if (state.instanceIdentity) {
+          await registerPubkey(dht, state.instanceIdentity.id, state.instanceIdentity.pubkey, logger).catch(() => {
+            // Already logged inside registerPubkey
+          });
+        }
+      }
+    }
 
     logger?.info?.(`[libp2p-mesh] Node started. Peer ID: ${state.node.peerId.toString()}`);
     logger?.info?.(`[libp2p-mesh] Listening on: ${state.node.getMultiaddrs().map((ma) => ma.toString()).join(", ")}`);
@@ -204,19 +310,46 @@ export function createMeshNetwork(options: {
     }
   }
 
+  function buildSignedMessage(
+    base: Omit<P2PMessage, "instanceId" | "signature">,
+  ): P2PMessage {
+    const instanceId = state.instanceIdentity?.id;
+    const sign = state.signMessage;
+
+    const msg: P2PMessage = { ...base };
+
+    if (instanceId && sign) {
+      msg.instanceId = instanceId;
+      msg.pubkey = state.instanceIdentity?.pubkey;
+      const signedPayload = JSON.stringify({
+        id: msg.id,
+        type: msg.type,
+        from: msg.from,
+        to: msg.to,
+        topic: msg.topic,
+        payload: msg.payload,
+        timestamp: msg.timestamp,
+        instanceId: msg.instanceId,
+      });
+      msg.signature = sign(signedPayload);
+    }
+
+    return msg;
+  }
+
   async function sendToPeer(peerId: string, message: string): Promise<void> {
     if (!state.node) {
       throw new Error("Mesh network is not started");
     }
 
-    const msg: P2PMessage = {
+    const msg = buildSignedMessage({
       id: crypto.randomUUID(),
       type: "direct",
       from: state.node.peerId.toString(),
       to: peerId,
       payload: message,
       timestamp: Date.now(),
-    };
+    });
 
     const data = new TextEncoder().encode(JSON.stringify(msg));
 
@@ -226,7 +359,7 @@ export function createMeshNetwork(options: {
     try {
       const { peerIdFromString } = await import("@libp2p/peer-id");
       logger?.debug?.(`[libp2p-mesh] dialProtocol to ${peerId}`);
-      const stream = await state.node.dialProtocol(peerIdFromString(peerId) as any, PROTOCOL, {
+      const stream = await state.node.dialProtocol(peerIdFromString(peerId), PROTOCOL, {
         signal: abortController.signal,
       });
       if (!stream) {
@@ -251,14 +384,14 @@ export function createMeshNetwork(options: {
       throw new Error("Mesh network is not started");
     }
 
-    const msg: P2PMessage = {
+    const msg = buildSignedMessage({
       id: crypto.randomUUID(),
       type: "broadcast",
       from: state.node.peerId.toString(),
       topic,
       payload: message,
       timestamp: Date.now(),
-    };
+    });
 
     const data = new TextEncoder().encode(JSON.stringify(msg));
     const connections = state.node.getConnections();
@@ -283,7 +416,6 @@ export function createMeshNetwork(options: {
 
   async function forwardBroadcast(msg: P2PMessage, fromPeerId: string): Promise<void> {
     if (!state.node) return;
-    // Simple flood-fill: forward to all connected peers except the sender
     const data = new TextEncoder().encode(JSON.stringify(msg));
     for (const conn of state.node.getConnections()) {
       const remotePeerId = conn.remotePeer.toString();
@@ -325,6 +457,23 @@ export function createMeshNetwork(options: {
     return [...new Set(peers)];
   }
 
+  function getMultiaddrs(): string[] {
+    if (!state.node) return [];
+    return state.node.getMultiaddrs().map((ma) => ma.toString());
+  }
+
+  function getInstanceIdentity(): InstanceIdentity | undefined {
+    return state.instanceIdentity ?? undefined;
+  }
+
+  async function dial(multiaddr: string): Promise<void> {
+    if (!state.node) {
+      throw new Error("Mesh network is not started");
+    }
+    const { multiaddr: ma } = await import("@multiformats/multiaddr");
+    await state.node.dial(ma(multiaddr));
+  }
+
   return {
     start,
     stop,
@@ -334,5 +483,8 @@ export function createMeshNetwork(options: {
     subscribeToTopic,
     getLocalPeerId,
     getConnectedPeers,
+    getMultiaddrs,
+    dial,
+    getInstanceIdentity,
   };
 }

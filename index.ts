@@ -38,6 +38,7 @@ function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
         bootstrapList: {
           type: "array",
           items: { type: "string" },
+          description: "List of bootstrap multiaddrs for WAN discovery (required when discovery=dht or bootstrap)",
         },
         meshTopic: {
           type: "string",
@@ -50,6 +51,15 @@ function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
         enableAgentSync: {
           type: "boolean",
           default: true,
+        },
+        enableDHT: {
+          type: "boolean",
+          default: true,
+          description: "Enable DHT for WAN peer discovery and pubkey registry. Default true when discovery=dht, can be explicitly disabled.",
+        },
+        instanceName: {
+          type: "string",
+          description: "Custom name for this OpenClaw instance (used in InstanceID). Defaults to \"<username>-<hostname>\".",
         },
       },
     },

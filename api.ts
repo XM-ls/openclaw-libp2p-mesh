@@ -1,2 +1,2 @@
 export { createMeshNetwork } from "./src/mesh.js";
-export type { MeshNetwork, P2PMessage, MeshConfig } from "./src/types.js";
+export type { MeshNetwork, P2PMessage, MeshConfig, InstanceIdentity } from "./src/types.js";

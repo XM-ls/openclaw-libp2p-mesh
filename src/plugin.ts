@@ -7,7 +7,7 @@ import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
   const mesh = createMeshNetwork({
-    config: api.pluginConfig as { listenAddrs?: string[]; discovery?: "mdns" | "bootstrap" | "dht"; bootstrapList?: string[]; meshTopic?: string; enableAgentSync?: boolean; enableWebSocket?: boolean } | undefined,
+    config: api.pluginConfig as { listenAddrs?: string[]; discovery?: "mdns" | "bootstrap" | "dht"; bootstrapList?: string[]; meshTopic?: string; enableAgentSync?: boolean; enableWebSocket?: boolean; enableDHT?: boolean; instanceName?: string } | undefined,
     logger: api.logger,
   });
 
@@ -19,7 +19,11 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
       mesh.onMessage((msg) => {
         handleP2PInbound(msg, { logger: api.logger });
       });
+      const identity = mesh.getInstanceIdentity();
       api.logger.info?.(`[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`);
+      if (identity) {
+        api.logger.info?.(`[libp2p-mesh] Instance Identity: ${identity.id}`);
+      }
     },
     stop: async () => {
       await mesh.stop();

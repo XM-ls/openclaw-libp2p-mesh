@@ -112,5 +112,84 @@ export function buildP2PTools(mesh: MeshNetwork) {
         }
       },
     },
+    {
+      name: "p2p_get_instance_identity",
+      label: "P2P Get Instance Identity",
+      description: "Get the OpenClaw instance identity (lightweight BAID-inspired ID) of this node.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute(_toolCallId: string) {
+        try {
+          const identity = mesh.getInstanceIdentity();
+          if (!identity) {
+            return {
+              content: [{ type: "text" as const, text: "Instance identity not yet initialized." }],
+              details: { initialized: false },
+            };
+          }
+          const lines = [
+            `Instance ID: ${identity.id}`,
+            `Name:        ${identity.name}`,
+            `Pubkey:      ${identity.pubkey.slice(0, 32)}...`,
+            `Binding:     ${identity.binding.slice(0, 16)}...`,
+            `Bound to:    ${identity.bindingComponents.username}@${identity.bindingComponents.hostname} (${identity.bindingComponents.platform})`,
+            `Created:     ${new Date(identity.createdAt).toLocaleString()}`,
+          ];
+          return {
+            content: [{ type: "text" as const, text: lines.join("\n") }],
+            details: { identity },
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `Error: ${String(err)}` }],
+            details: { error: String(err) },
+            isError: true,
+          };
+        }
+      },
+    },
+    {
+      name: "p2p_get_network_info",
+      label: "P2P Get Network Info",
+      description: "Get combined network and identity info: Peer ID, Instance ID, listen addresses, and connected peers.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute(_toolCallId: string) {
+        try {
+          const identity = mesh.getInstanceIdentity();
+          const peerId = mesh.getLocalPeerId();
+          const addrs = mesh.getMultiaddrs();
+          const peers = mesh.getConnectedPeers();
+
+          const lines = [
+            `Peer ID:      ${peerId || "(not started)"}`,
+            `Instance ID:  ${identity?.id || "(not initialized)"}`,
+            `Instance:     ${identity?.bindingComponents.username}@${identity?.bindingComponents.hostname}` || "",
+            `Listen Addrs: ${addrs.length > 0 ? addrs.join(", ") : "(none)"}`,
+            `Connected:    ${peers.length} peer(s)${peers.length > 0 ? ": " + peers.join(", ") : ""}`,
+          ];
+
+          return {
+            content: [{ type: "text" as const, text: lines.join("\n") }],
+            details: {
+              peerId,
+              instanceId: identity?.id,
+              listenAddrs: addrs,
+              connectedPeers: peers,
+            },
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `Error: ${String(err)}` }],
+            details: { error: String(err) },
+            isError: true,
+          };
+        }
+      },
+    },
   ];
 }

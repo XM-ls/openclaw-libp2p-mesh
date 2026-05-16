@@ -1,5 +1,9 @@
 {
   "id": "libp2p-mesh",
+  "activation": {
+    "onStartup": true
+  },
+  "enabledByDefault": true,
   "name": "libp2p Mesh Network",
   "description": "P2P network for cross-instance agent communication via libp2p.",
   "configSchema": {
@@ -36,10 +40,28 @@
       "enableAgentSync": {
         "type": "boolean",
         "default": true
+      },
+      "enableDHT": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable DHT for WAN peer discovery and pubkey registry."
+      },
+      "instanceName": {
+        "type": "string",
+        "description": "Custom name for this OpenClaw instance (used in InstanceID). Defaults to \"<username>-<hostname>\"."
       }
     }
   },
   "channels": ["libp2p-mesh"],
+  "contracts": {
+    "tools": [
+      "p2p_send_message",
+      "p2p_broadcast",
+      "p2p_list_peers",
+      "p2p_get_instance_identity",
+      "p2p_get_network_info"
+    ]
+  },
   "uiHints": {
     "listenAddrs": {
       "label": "Listen Addresses",
