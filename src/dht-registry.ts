@@ -31,7 +31,7 @@ export async function registerPubkey(
   dht: KadDHT,
   instanceId: string,
   pubkey: string,
-  logger?: { debug?: (msg: string) => void; warn?: (msg: string) => void },
+  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void; warn?: (msg: string) => void },
 ): Promise<void> {
   const key = encodeKey(instanceId);
   const value = new TextEncoder().encode(pubkey);
@@ -55,7 +55,7 @@ export async function registerPubkey(
 export async function lookupPubkey(
   dht: KadDHT,
   instanceId: string,
-  logger?: { debug?: (msg: string) => void; warn?: (msg: string) => void },
+  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void; warn?: (msg: string) => void },
 ): Promise<string | undefined> {
   // 1. Check local cache
   const cached = pubkeyCache.get(instanceId);

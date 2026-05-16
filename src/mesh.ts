@@ -26,12 +26,17 @@ import {
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
 import { bootstrap } from "@libp2p/bootstrap";
+import { identifyService } from "libp2p/identify";
+import { autoNATService } from "libp2p/autonat";
+import { circuitRelayServer, circuitRelayTransport } from "libp2p/circuit-relay";
+import { dcutrService } from "libp2p/dcutr";
+import { uPnPNATService } from "libp2p/upnp-nat";
 import { encode, decode } from "it-length-prefixed";
 import { pipe } from "it-pipe";
 import { createLibp2p } from "libp2p";
 import { Uint8ArrayList } from "uint8arraylist";
 import type { Libp2p } from "libp2p";
-import type { MeshConfig, MeshNetwork, P2PMessage, InstanceIdentity } from "./types.js";
+import type { MeshConfig, MeshNetwork, NATTraversalStatus, P2PMessage, InstanceIdentity } from "./types.js";
 import {
   loadOrCreateInstanceIdentity,
   verifyInstanceSignature,
@@ -76,6 +81,14 @@ export function createMeshNetwork(options: {
     node: null as Libp2p | null,
     instanceIdentity: null as InstanceIdentity | null,
     signMessage: null as ((message: string) => string) | null,
+    natFlags: {
+      identify: false,
+      autoNAT: false,
+      upnp: false,
+      circuitRelay: false,
+      circuitRelayServer: false,
+      dcutr: false,
+    },
   };
 
   const seenMessages = new Set<string>();
@@ -135,10 +148,92 @@ export function createMeshNetwork(options: {
       services.dht = kadDHT({
         protocolPrefix: "/openclaw",
         clientMode: false,
-        lan: false,
-      });
+      } as any);
       logger?.info?.("[libp2p-mesh] DHT enabled (protocol: /openclaw/kad/1.0.0)");
     }
+
+    // -------------------------------------------------------------------
+    // NAT traversal stack (identify + autonat + upnp + circuit-relay + dcutr)
+    // -------------------------------------------------------------------
+    const natOn = config.enableNATTraversal !== false;
+    const useIdentify = natOn && config.enableIdentify !== false;
+    const useAutoNAT = natOn && config.enableAutoNAT !== false;
+    const useUPnP = natOn && config.enableUPnP !== false;
+    const useRelay = natOn && config.enableCircuitRelay !== false;
+    const useRelayServer = natOn && config.enableCircuitRelayServer === true;
+    const useDCUtR = natOn && config.enableDCUtR !== false;
+    const relayList = config.relayList ?? [];
+    const discoverRelays = Math.max(0, config.discoverRelays ?? 0);
+
+    if (useIdentify) {
+      services.identify = identifyService();
+      state.natFlags.identify = true;
+      logger?.info?.("[libp2p-mesh] identify service enabled");
+    } else if (useAutoNAT || useDCUtR) {
+      logger?.warn?.(
+        "[libp2p-mesh] enableIdentify=false but AutoNAT/DCUtR rely on identify; they may not function correctly",
+      );
+    }
+
+    if (useAutoNAT) {
+      services.autoNAT = autoNATService();
+      state.natFlags.autoNAT = true;
+      logger?.info?.("[libp2p-mesh] AutoNAT enabled (will probe reachability)");
+    }
+
+    if (useUPnP) {
+      services.upnp = uPnPNATService({
+        description: `openclaw-libp2p-mesh/${state.instanceIdentity?.bindingComponents?.hostname ?? "node"}`,
+        keepAlive: true,
+      });
+      state.natFlags.upnp = true;
+      logger?.info?.("[libp2p-mesh] UPnP NAT port-mapping enabled");
+    }
+
+    if (useRelay) {
+      transports.push(
+        circuitRelayTransport({
+          discoverRelays,
+        }),
+      );
+      state.natFlags.circuitRelay = true;
+      logger?.info?.(
+        `[libp2p-mesh] Circuit Relay v2 transport enabled (discoverRelays=${discoverRelays})`,
+      );
+    }
+
+    if (useRelayServer) {
+      services.circuitRelay = circuitRelayServer({
+        // Advertise via content-routing only if DHT is up — otherwise the
+        // service still runs but won't auto-publish itself.
+        advertise: enableDHT,
+      });
+      state.natFlags.circuitRelayServer = true;
+      logger?.info?.(
+        `[libp2p-mesh] Circuit Relay v2 SERVER enabled (advertise=${enableDHT}) — this node will relay traffic for other peers`,
+      );
+    }
+
+    if (useDCUtR) {
+      services.dcutr = dcutrService();
+      state.natFlags.dcutr = true;
+      logger?.info?.("[libp2p-mesh] DCUtR (hole-punching) enabled");
+    }
+
+    // Build the addresses block. listen always honours user config. The
+    // circuit-relay transport reserves a slot on each relay we listen on
+    // via /p2p-circuit — auto-derive those entries from relayList when the
+    // user hasn't already specified them.
+    const listenAddrs = [...(config.listenAddrs ?? ["/ip4/0.0.0.0/tcp/0"])];
+    if (useRelay) {
+      for (const relay of relayList) {
+        const circuitListen = relay.endsWith("/p2p-circuit") ? relay : `${relay}/p2p-circuit`;
+        if (!listenAddrs.includes(circuitListen)) {
+          listenAddrs.push(circuitListen);
+        }
+      }
+    }
+    const announce = config.announceAddrs ?? [];
 
     state.node = await createLibp2p({
       peerId,
@@ -147,10 +242,17 @@ export function createMeshNetwork(options: {
       connectionEncryption: [noise()],
       streamMuxers: [mplex()],
       addresses: {
-        listen: config.listenAddrs ?? ["/ip4/0.0.0.0/tcp/0"],
+        listen: listenAddrs,
+        announce,
       },
       peerDiscovery,
       services,
+      // Circuit-relay-v2 transport can't bind to a listen address until a
+      // relay reservation is established, so allow per-transport listen
+      // failures when it's enabled rather than crashing the whole node.
+      transportManager: useRelay
+        ? { faultTolerance: 1 /* FaultTolerance.NO_FATAL */ }
+        : undefined,
     });
 
     state.node.addEventListener("peer:connect", (evt) => {
@@ -163,7 +265,9 @@ export function createMeshNetwork(options: {
       logger?.debug?.(`[libp2p-mesh] Peer disconnected: ${peerIdStr}`);
     });
 
-    await state.node.handle(PROTOCOL, async ({ stream, connection }) => {
+    await state.node.handle(
+      PROTOCOL,
+      async ({ stream, connection }) => {
       try {
         await pipe(
           stream.source,
@@ -266,7 +370,13 @@ export function createMeshNetwork(options: {
       } catch (err) {
         logger?.error?.(`[libp2p-mesh] Protocol handler error: ${String(err)}`);
       }
-    });
+    },
+      {
+        // Allow the openclaw protocol to be served over relayed (transient)
+        // connections; without this, peers behind NAT can't deliver messages.
+        runOnTransientConnection: true,
+      },
+    );
 
     await state.node.start();
 
@@ -295,6 +405,23 @@ export function createMeshNetwork(options: {
             // Already logged inside registerPubkey
           });
         }
+      }
+    }
+
+    // Reserve a slot on each configured relay so other peers can dial us
+    // through them via /p2p-circuit. Fire-and-forget; failures are logged.
+    if (useRelay && relayList.length > 0) {
+      const { multiaddr } = await import("@multiformats/multiaddr");
+      for (const addr of relayList) {
+        const node = state.node!;
+        (async () => {
+          try {
+            await node.dial(multiaddr(addr));
+            logger?.info?.(`[libp2p-mesh] Connected to relay ${addr} — reservation in progress`);
+          } catch (err) {
+            logger?.warn?.(`[libp2p-mesh] Failed to connect to relay ${addr}: ${String(err)}`);
+          }
+        })();
       }
     }
 
@@ -361,6 +488,7 @@ export function createMeshNetwork(options: {
       logger?.debug?.(`[libp2p-mesh] dialProtocol to ${peerId}`);
       const stream = await state.node.dialProtocol(peerIdFromString(peerId), PROTOCOL, {
         signal: abortController.signal,
+        runOnTransientConnection: true,
       });
       if (!stream) {
         throw new Error(`Failed to establish stream to ${peerId}; peer may be unreachable`);
@@ -401,7 +529,10 @@ export function createMeshNetwork(options: {
       const abortController = new AbortController();
       const timeout = setTimeout(() => abortController.abort(), 5000);
       try {
-        const stream = await conn.newStream(PROTOCOL, { signal: abortController.signal });
+        const stream = await conn.newStream(PROTOCOL, {
+          signal: abortController.signal,
+          runOnTransientConnection: true,
+        });
         await pipe([new Uint8ArrayList(data)], encode, stream.sink);
         sent++;
       } catch {
@@ -423,7 +554,10 @@ export function createMeshNetwork(options: {
       const abortController = new AbortController();
       const timeout = setTimeout(() => abortController.abort(), 5000);
       try {
-        const stream = await conn.newStream(PROTOCOL, { signal: abortController.signal });
+        const stream = await conn.newStream(PROTOCOL, {
+          signal: abortController.signal,
+          runOnTransientConnection: true,
+        });
         await pipe([new Uint8ArrayList(data)], encode, stream.sink);
       } catch {
         // Ignore forwarding errors
@@ -474,6 +608,24 @@ export function createMeshNetwork(options: {
     await state.node.dial(ma(multiaddr));
   }
 
+  function getNATStatus(): NATTraversalStatus {
+    const enabled = { ...state.natFlags };
+    const reservedRelays: string[] = [];
+    let hasRelayedListenAddr = false;
+    if (state.node) {
+      // Listen multiaddrs that include /p2p-circuit are reservations the
+      // circuit-relay transport managed to acquire from a relay server.
+      for (const ma of state.node.getMultiaddrs()) {
+        const s = ma.toString();
+        if (s.includes("/p2p-circuit")) {
+          hasRelayedListenAddr = true;
+          reservedRelays.push(s);
+        }
+      }
+    }
+    return { enabled, reservedRelays, hasRelayedListenAddr };
+  }
+
   return {
     start,
     stop,
@@ -486,5 +638,6 @@ export function createMeshNetwork(options: {
     getMultiaddrs,
     dial,
     getInstanceIdentity,
+    getNATStatus,
   };
 }

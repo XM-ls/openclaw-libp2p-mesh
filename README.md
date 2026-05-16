@@ -9,6 +9,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 - **Broadcast** — Publish messages to a shared topic, flood-fill forwarded across the mesh
 - **Bootstrap Mode** — Optional static bootstrap peer list for non-LAN scenarios
 - **WebSocket Transport** — Optional WebSocket support for NAT/firewall-friendly connections
+- **NAT Traversal** — Built-in AutoNAT + UPnP + Circuit Relay v2 + DCUtR for peers behind home routers / firewalls
 
 ## Requirements
 
@@ -145,6 +146,72 @@ If peers are on different networks, use a bootstrap node:
 | `enableWebSocket` | `boolean` | `false` | Enable WebSocket transport for browser/NAT compatibility |
 | `meshTopic` | `string` | `"openclaw-mesh"` | Default broadcast topic |
 | `enableAgentSync` | `boolean` | `true` | Enable agent state synchronization over the mesh |
+| `enableNATTraversal` | `boolean` | `true` | Master switch for identify + AutoNAT + UPnP + Circuit Relay v2 + DCUtR |
+| `enableIdentify` | `boolean` | `true` | libp2p identify protocol (required by AutoNAT and DCUtR) |
+| `enableAutoNAT` | `boolean` | `true` | AutoNAT — detect whether this node is publicly reachable |
+| `enableUPnP` | `boolean` | `true` | Attempt UPnP/PMP port mapping on the local gateway |
+| `enableCircuitRelay` | `boolean` | `true` | Dial peers via /p2p-circuit relay addresses |
+| `enableCircuitRelayServer` | `boolean` | `false` | Act as a Circuit Relay v2 server (only enable on a public node) |
+| `enableDCUtR` | `boolean` | `true` | Hole-punching: upgrade a relayed connection to a direct one |
+| `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
+| `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
+| `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
+
+## NAT Traversal
+
+When both peers have a routable address (same LAN, public IPs, or working port-forwarding) no extra setup is needed. The defaults above kick in automatically:
+
+- **UPnP** asks your home router to open a port for libp2p TCP.
+- **AutoNAT** asks peers to verify whether you're reachable from the outside.
+- If you're not directly reachable, **Circuit Relay v2** lets another peer (the "relay") forward traffic on your behalf. The relay only sees encrypted bytes — Noise still terminates end-to-end at the original peers.
+- Once a relayed connection is established, **DCUtR** tries to upgrade it to a direct connection via simultaneous TCP open (hole punching). This works for most home NATs (full-cone, restricted-cone, port-restricted) but not symmetric NATs (CGNAT, some carrier networks).
+
+### Behind a NAT — minimal config
+
+You need at least one relay node with a public IP. Set it in `relayList`:
+
+```json
+{
+  "plugins": {
+    "libp2p-mesh": {
+      "enabled": true,
+      "config": {
+        "discovery": "bootstrap",
+        "bootstrapList": [
+          "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
+        ],
+        "relayList": [
+          "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
+        ]
+      }
+    }
+  }
+}
+```
+
+After start-up you should see your node listening on a `/p2p-circuit` address — that's how remote peers will reach you.
+
+### Running your own relay on a public VM
+
+Add `enableCircuitRelayServer: true` to your config and announce the public address so other peers can dial you:
+
+```json
+{
+  "plugins": {
+    "libp2p-mesh": {
+      "enabled": true,
+      "config": {
+        "discovery": "bootstrap",
+        "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
+        "announceAddrs": ["/ip4/<PUBLIC-IP>/tcp/4001"],
+        "enableCircuitRelayServer": true
+      }
+    }
+  }
+}
+```
+
+> Detailed walkthrough including how to rent a cloud VM is in `../TESTING_NAT.md`.
 
 ## Usage: Two Computers on the Same LAN
 

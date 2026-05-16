@@ -4,10 +4,11 @@ import { handleP2PInbound } from "./inbound.js";
 import { createMeshNetwork } from "./mesh.js";
 import { buildP2PTools } from "./agent-tools.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
+import type { MeshConfig } from "./types.js";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
   const mesh = createMeshNetwork({
-    config: api.pluginConfig as { listenAddrs?: string[]; discovery?: "mdns" | "bootstrap" | "dht"; bootstrapList?: string[]; meshTopic?: string; enableAgentSync?: boolean; enableWebSocket?: boolean; enableDHT?: boolean; instanceName?: string } | undefined,
+    config: api.pluginConfig as MeshConfig | undefined,
     logger: api.logger,
   });
 
@@ -23,6 +24,20 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
       api.logger.info?.(`[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`);
       if (identity) {
         api.logger.info?.(`[libp2p-mesh] Instance Identity: ${identity.id}`);
+      }
+      const nat = mesh.getNATStatus();
+      const enabledNames = Object.entries(nat.enabled)
+        .filter(([, on]) => on)
+        .map(([k]) => k);
+      if (enabledNames.length > 0) {
+        api.logger.info?.(
+          `[libp2p-mesh] NAT traversal services: ${enabledNames.join(", ")}`,
+        );
+      }
+      if (nat.reservedRelays.length > 0) {
+        api.logger.info?.(
+          `[libp2p-mesh] Active relay reservations: ${nat.reservedRelays.join(", ")}`,
+        );
       }
     },
     stop: async () => {
