@@ -52,7 +52,6 @@
       }
     }
   },
-  "channels": ["libp2p-mesh"],
   "contracts": {
     "tools": [
       "p2p_send_message",
