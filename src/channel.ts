@@ -2,8 +2,12 @@ import { createChatChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { MeshNetwork, MeshAccount } from "./types.js";
 import { sendViaMesh } from "./send.js";
+import {
+  getLibp2pMeshRuntime,
+  hasLibp2pMeshRuntime,
+} from "../runtime-setter-api.js";
 
-export function createLibp2pMeshChannel(mesh: MeshNetwork): ChannelPlugin {
+function buildChannel(getMesh: () => MeshNetwork): ChannelPlugin {
   return createChatChannelPlugin<MeshAccount>({
     base: {
       id: "libp2p-mesh",
@@ -42,7 +46,9 @@ export function createLibp2pMeshChannel(mesh: MeshNetwork): ChannelPlugin {
           name: "default",
           configured: true,
           enabled: true,
-          connected: mesh.getConnectedPeers().length > 0,
+          connected: hasLibp2pMeshRuntime()
+            ? getMesh().getConnectedPeers().length > 0
+            : false,
         }),
       },
       messaging: {
@@ -57,12 +63,27 @@ export function createLibp2pMeshChannel(mesh: MeshNetwork): ChannelPlugin {
       deliveryMode: "gateway",
       sendText: async ({ to, text }) => {
         try {
-          await sendViaMesh(mesh, to, text);
+          await sendViaMesh(getMesh(), to, text);
           return { channel: "libp2p-mesh", messageId: `p2p-${Date.now()}` };
         } catch (err) {
-          return { channel: "libp2p-mesh", messageId: `p2p-${Date.now()}`, meta: { error: String(err) } };
+          return {
+            channel: "libp2p-mesh",
+            messageId: `p2p-${Date.now()}`,
+            meta: { error: String(err) },
+          };
         }
       },
     },
   }) as ChannelPlugin;
+}
+
+// Static channel plugin export for the bundled-channel-entry contract.
+// The mesh instance is resolved lazily through runtime-setter-api.ts, which
+// plugin.ts populates after starting the mesh service.
+export const libp2pMeshPlugin: ChannelPlugin = buildChannel(getLibp2pMeshRuntime);
+
+// Backwards-compatible factory: kept so any caller that still passes the mesh
+// instance directly (e.g. the standalone plugin entry) continues to work.
+export function createLibp2pMeshChannel(mesh: MeshNetwork): ChannelPlugin {
+  return buildChannel(() => mesh);
 }

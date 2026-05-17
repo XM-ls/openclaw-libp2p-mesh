@@ -3,6 +3,7 @@
   "activation": {
     "onStartup": true
   },
+  "channels": ["libp2p-mesh"],
   "enabledByDefault": true,
   "name": "libp2p Mesh Network",
   "description": "P2P network for cross-instance agent communication via libp2p.",
@@ -49,6 +50,56 @@
       "instanceName": {
         "type": "string",
         "description": "Custom name for this OpenClaw instance (used in InstanceID). Defaults to \"<username>-<hostname>\"."
+      },
+      "enableNATTraversal": {
+        "type": "boolean",
+        "default": true,
+        "description": "Master switch for the NAT traversal stack (identify + AutoNAT + UPnP + Circuit Relay v2 + DCUtR)."
+      },
+      "enableIdentify": {
+        "type": "boolean",
+        "default": true,
+        "description": "Run the libp2p identify protocol; required by AutoNAT and DCUtR."
+      },
+      "enableAutoNAT": {
+        "type": "boolean",
+        "default": true,
+        "description": "Use AutoNAT to learn whether this node is publicly reachable."
+      },
+      "enableUPnP": {
+        "type": "boolean",
+        "default": true,
+        "description": "Attempt UPnP/PMP port mapping on the local gateway."
+      },
+      "enableCircuitRelay": {
+        "type": "boolean",
+        "default": true,
+        "description": "Dial peers via /p2p-circuit relay addresses; reserve a slot on each entry in relayList."
+      },
+      "enableCircuitRelayServer": {
+        "type": "boolean",
+        "default": false,
+        "description": "Act as a Circuit Relay v2 server. Only enable on a publicly reachable node."
+      },
+      "enableDCUtR": {
+        "type": "boolean",
+        "default": true,
+        "description": "Direct Connection Upgrade through Relay (hole punching)."
+      },
+      "relayList": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Multiaddrs of relays to reserve a slot on (each entry must end in /p2p/<peer-id>)."
+      },
+      "discoverRelays": {
+        "type": "number",
+        "default": 0,
+        "description": "Auto-discover this many relays via content routing. Requires DHT."
+      },
+      "announceAddrs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Extra multiaddrs to announce to the network on top of auto-detected ones."
       }
     }
   },

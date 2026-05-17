@@ -1,0 +1,98 @@
+# Three-container NAT-simulation harness for openclaw + openclaw-libp2p-mesh.
+#
+# Topology:
+#
+#   ┌──────────────────────────────────────────────────────────────────┐
+#   │   bridge: relay-net (172.30.0.0/24)                              │
+#   │      ┌─────────────────────┐                                     │
+#   │      │ relay (multi-homed) │                                     │
+#   │      └─────────────────────┘                                     │
+#   └──────────┬─────────────────┬──────────────────────────────────────┘
+#              │                 │
+#   ┌──────────┴──────┐  ┌───────┴────────────┐
+#   │ bridge: nat-a   │  │ bridge: nat-b      │
+#   │   client-a      │  │   client-b         │
+#   └─────────────────┘  └────────────────────┘
+#
+# - The relay container is on ALL three bridges.
+# - client-a is ONLY on nat-a; client-b is ONLY on nat-b.
+#   They cannot directly reach each other because user-defined bridges
+#   are isolated by docker's network-isolation iptables rules.
+# - Each container resolves the hostname "relay" via docker DNS within
+#   its own network → relay's IP on that network. So multiaddrs like
+#   /dns4/relay/tcp/4001/p2p/<RELAY-ID> work uniformly from both clients.
+#
+# Quick start (after first build):
+#   ./run.sh up       # builds image, starts relay, then clients, fills in PeerIDs
+#   ./run.sh send     # send test messages both directions and verify receipt
+#   ./run.sh down     # stop & clean
+#
+# See README.md for details.
+
+services:
+  relay:
+    build:
+      context: ../../..             # /home/zkr/openclaw_add/
+      dockerfile: openclaw-libp2p-mesh/test/nat-docker/Dockerfile
+    image: openclaw-nat-test:latest
+    container_name: nat-test-relay
+    hostname: relay
+    networks:
+      relay-net:
+        aliases: [relay]
+      nat-a:
+        aliases: [relay]
+      nat-b:
+        aliases: [relay]
+    volumes:
+      - ./.state/relay/openclaw.json:/root/.openclaw/openclaw.json:ro
+      - relay-state:/root/.openclaw
+    environment:
+      - OPENCLAW_LOG=info
+    command: ["gateway", "run"]
+
+  client-a:
+    image: openclaw-nat-test:latest
+    container_name: nat-test-client-a
+    hostname: client-a
+    networks: [nat-a]
+    volumes:
+      - ./.state/client-a/openclaw.json:/root/.openclaw/openclaw.json:ro
+      - client-a-state:/root/.openclaw
+    environment:
+      - OPENCLAW_LOG=info
+    depends_on:
+      relay:
+        condition: service_started
+    command: ["gateway", "run"]
+
+  client-b:
+    image: openclaw-nat-test:latest
+    container_name: nat-test-client-b
+    hostname: client-b
+    networks: [nat-b]
+    volumes:
+      - ./.state/client-b/openclaw.json:/root/.openclaw/openclaw.json:ro
+      - client-b-state:/root/.openclaw
+    environment:
+      - OPENCLAW_LOG=info
+    depends_on:
+      relay:
+        condition: service_started
+    command: ["gateway", "run"]
+
+networks:
+  relay-net:
+    driver: bridge
+    ipam: { config: [{ subnet: 172.30.0.0/24 }] }
+  nat-a:
+    driver: bridge
+    ipam: { config: [{ subnet: 172.31.0.0/24 }] }
+  nat-b:
+    driver: bridge
+    ipam: { config: [{ subnet: 172.32.0.0/24 }] }
+
+volumes:
+  relay-state:
+  client-a-state:
+  client-b-state:

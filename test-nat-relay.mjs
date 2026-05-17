@@ -15,7 +15,12 @@
  * relay path produces.
  *
  * Whether this protocol path actually defeats a real-world NAT must be
- * verified separately (see TESTING_NAT.md sections 4 and 5).
+ * verified separately:
+ *
+ *   - Full end-to-end test with openclaw + plugin + simulated NAT (no cloud
+ *     server required): see `test/nat-docker/` and `TESTING_NAT.md` test E.
+ *   - Real cross-NAT real-machine deployment: see `TESTING_NAT.md` test C
+ *     and `../../openclaw_add/openclaw-nat-3node-guide.md`.
  *
  * Run with:
  *   node --import tsx test-nat-relay.mjs

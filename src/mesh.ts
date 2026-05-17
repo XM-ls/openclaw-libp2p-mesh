@@ -485,8 +485,44 @@ export function createMeshNetwork(options: {
 
     try {
       const { peerIdFromString } = await import("@libp2p/peer-id");
+      const targetPid = peerIdFromString(peerId);
+
+      // If we have no open connection to the target and no peer-store
+      // address (typical when both ends are NAT-isolated and only share a
+      // configured relay), proactively dial via each /p2p-circuit path we
+      // know — this is what makes the relay configuration actually deliver
+      // messages when peer discovery hasn't propagated yet.
+      const alreadyConnected = state.node
+        .getConnections()
+        .some((c) => c.remotePeer.equals(targetPid));
+      if (!alreadyConnected) {
+        const relayAddrs = config.relayList ?? [];
+        for (const relayAddr of relayAddrs) {
+          try {
+            const circuit = relayAddr.endsWith("/p2p-circuit")
+              ? `${relayAddr}/p2p/${peerId}`
+              : `${relayAddr}/p2p-circuit/p2p/${peerId}`;
+            const { multiaddr } = await import("@multiformats/multiaddr");
+            logger?.debug?.(
+              `[libp2p-mesh] sendToPeer: pre-dialling ${peerId} via relay path ${circuit}`,
+            );
+            await state.node.dial(multiaddr(circuit), {
+              signal: abortController.signal,
+            });
+            logger?.debug?.(
+              `[libp2p-mesh] sendToPeer: established relayed connection to ${peerId}`,
+            );
+            break;
+          } catch (relayErr) {
+            logger?.debug?.(
+              `[libp2p-mesh] sendToPeer: relay pre-dial via ${relayAddr} failed: ${String(relayErr)}`,
+            );
+          }
+        }
+      }
+
       logger?.debug?.(`[libp2p-mesh] dialProtocol to ${peerId}`);
-      const stream = await state.node.dialProtocol(peerIdFromString(peerId), PROTOCOL, {
+      const stream = await state.node.dialProtocol(targetPid, PROTOCOL, {
         signal: abortController.signal,
         runOnTransientConnection: true,
       });
