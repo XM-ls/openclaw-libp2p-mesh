@@ -40,6 +40,39 @@
     }
   },
   "channels": ["libp2p-mesh"],
+  "channelConfigs": {
+    "libp2p-mesh": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "listenAddrs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["/ip4/0.0.0.0/tcp/0"]
+          },
+          "enableWebSocket": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable WebSocket transport"
+          },
+          "discovery": {
+            "type": "string",
+            "enum": ["mdns", "bootstrap", "dht"],
+            "default": "mdns"
+          },
+          "bootstrapList": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "meshTopic": {
+            "type": "string",
+            "default": "openclaw-mesh"
+          }
+        }
+      }
+    }
+  },
   "uiHints": {
     "listenAddrs": {
       "label": "Listen Addresses",
