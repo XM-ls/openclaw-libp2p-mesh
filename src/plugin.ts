@@ -1,8 +1,9 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createLibp2pMeshChannel } from "./channel.js";
-import { handleP2PInbound } from "./inbound.js";
+import { handleP2PInbound, type InboundHandlerDeps } from "./inbound.js";
 import { createMeshNetwork } from "./mesh.js";
 import { buildP2PTools } from "./agent-tools.js";
+import { sendViaMesh } from "./send.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
@@ -11,13 +12,22 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
     logger: api.logger,
   });
 
+  const channel = createLibp2pMeshChannel(mesh);
+
   // 1. Register Service (manages libp2p node lifecycle)
   api.registerService({
     id: "libp2p-mesh",
     start: async () => {
       await mesh.start();
       mesh.onMessage((msg) => {
-        handleP2PInbound(msg, { logger: api.logger });
+        const sendToChannel: InboundHandlerDeps["sendToChannel"] = async (_channelId, target, text) => {
+          try {
+            await sendViaMesh(mesh, target, text);
+          } catch (err) {
+            api.logger.error?.(`[libp2p-mesh] sendToChannel error: ${err}`);
+          }
+        };
+        handleP2PInbound(msg, { logger: api.logger, sendToChannel });
       });
       api.logger.info?.(`[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`);
     },
@@ -29,7 +39,7 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
 
   // 2. Register Channel (lightweight debugging surface)
   api.registerChannel({
-    plugin: createLibp2pMeshChannel(mesh) as ChannelPlugin,
+    plugin: channel as ChannelPlugin,
   });
 
   // 3. Register Agent Tools
