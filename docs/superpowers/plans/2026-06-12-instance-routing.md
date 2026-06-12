@@ -932,7 +932,7 @@ git commit -m "feat: add inbound delivery adapter"
 - 新增：`test-instance-router.mjs`
 - 通过命令测试：`node --import tsx test-instance-router.mjs`
 
-- [ ] **步骤 1：编写使用 fake mesh 和 fake delivery 的 router 测试**
+- [x] **步骤 1：编写使用 fake mesh 和 fake delivery 的 router 测试**
 
 Create `test-instance-router.mjs`:
 
@@ -1138,7 +1138,7 @@ run().catch((err) => {
 });
 ```
 
-- [ ] **步骤 2：运行 router 测试以确认失败**
+- [x] **步骤 2：运行 router 测试以确认失败**
 
 ```bash
 node --import tsx test-instance-router.mjs
@@ -1146,7 +1146,7 @@ node --import tsx test-instance-router.mjs
 
 预期：失败，因为 `src/instance-router.ts` 还不存在。
 
-- [ ] **步骤 3：实现 `src/instance-router.ts`**
+- [x] **步骤 3：实现 `src/instance-router.ts`**
 
 创建：
 
@@ -1513,7 +1513,7 @@ export function createInstanceRouter(options: {
 }
 ```
 
-- [ ] **步骤 4：运行 router 测试**
+- [x] **步骤 4：运行 router 测试**
 
 ```bash
 node --import tsx test-instance-router.mjs
@@ -1521,7 +1521,7 @@ node --import tsx test-instance-router.mjs
 
 预期：`test-instance-router: all assertions passed`
 
-- [ ] **步骤 5：运行 store 测试 and build**
+- [x] **步骤 5：运行 store 测试 and build**
 
 ```bash
 node --import tsx test-instance-peer-store.mjs
@@ -1530,7 +1530,7 @@ pnpm build
 
 预期：两者都通过。
 
-- [ ] **步骤 6：提交 router**
+- [x] **步骤 6：提交 router**
 
 ```bash
 git add src/instance-router.ts test-instance-router.mjs
