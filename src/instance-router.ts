@@ -18,6 +18,7 @@ export type RouterLogger = {
 };
 
 type PendingAck = {
+  peerId: string;
   resolve: (payload: DeliveryAckPayload) => void;
   timer: ReturnType<typeof setTimeout>;
 };
@@ -181,6 +182,13 @@ export function createInstanceRouter(options: {
       );
       return;
     }
+    const senderRoute = await store.resolve(payload.fromInstanceId);
+    if (!senderRoute || senderRoute.peerId !== msg.from) {
+      logger?.warn?.(
+        `[libp2p-mesh] Ignoring user-message from ${msg.from}; instance ${payload.fromInstanceId} is not routed to that peer`,
+      );
+      return;
+    }
 
     const localId = localInstanceId();
     if (payload.toInstanceId !== localId) {
@@ -254,6 +262,12 @@ export function createInstanceRouter(options: {
     const pending = pendingAcks.get(payload.ackFor);
     if (!pending) {
       logger?.debug?.(`[libp2p-mesh] Ignoring unmatched delivery ACK for ${payload.ackFor}`);
+      return;
+    }
+    if (pending.peerId !== msg.from) {
+      logger?.warn?.(
+        `[libp2p-mesh] Ignoring delivery ACK for ${payload.ackFor} from unexpected peer ${msg.from}`,
+      );
       return;
     }
 
@@ -363,7 +377,7 @@ export function createInstanceRouter(options: {
           error: `ACK timeout after ${ackTimeoutMs}ms`,
         });
       }, ackTimeoutMs);
-      pendingAcks.set(messageId, { resolve, timer });
+      pendingAcks.set(messageId, { peerId: route.peerId, resolve, timer });
     });
 
     try {

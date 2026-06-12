@@ -235,6 +235,69 @@ async function run() {
   });
   assert.equal(deliveries.length, 1);
 
+  await store.upsertFromAnnounce({
+    instanceId: "carol@ghi.789",
+    peerId: "peer-c",
+    instanceName: "carol",
+    multiaddrs: ["/ip4/127.0.0.1/tcp/3/p2p/peer-c"],
+    pubkey: "pub-c",
+    announcedAt: 300,
+  });
+  await router.handleMessage({
+    id: "user-message-wrong-peer",
+    type: "user-message",
+    from: "peer-x",
+    instanceId: "carol@ghi.789",
+    payload: JSON.stringify({
+      messageId: "remote-message-3",
+      fromInstanceId: "carol@ghi.789",
+      toInstanceId: "alice@abc.123",
+      text: "wrong peer",
+      metadata: {
+        allowAgentAutoReply: true,
+        replyToInstanceId: "carol@ghi.789",
+        replyTool: "p2p_send_instance_message",
+      },
+    }),
+    timestamp: Date.now(),
+  });
+  assert.equal(deliveries.length, 1);
+
+  const ackSpoofPromise = router.sendInstanceMessage("bob@def.456", "ack spoof");
+  const ackSpoofOutbound = await waitForMessage(
+    mesh,
+    (m) => m.message.type === "user-message" && JSON.parse(m.message.payload).text === "ack spoof",
+  );
+  const ackSpoofPayload = JSON.parse(ackSpoofOutbound.message.payload);
+  await router.handleMessage({
+    id: "ack-spoof",
+    type: "delivery-ack",
+    from: "peer-x",
+    payload: JSON.stringify({
+      ackFor: ackSpoofPayload.messageId,
+      ok: true,
+      inboundChannel: "feishu",
+      inboundTarget: "user:ou_xxx",
+      deliveredAt: Date.now(),
+    }),
+    timestamp: Date.now(),
+  });
+  await router.handleMessage({
+    id: "ack-real",
+    type: "delivery-ack",
+    from: "peer-b",
+    payload: JSON.stringify({
+      ackFor: ackSpoofPayload.messageId,
+      ok: true,
+      inboundChannel: "feishu",
+      inboundTarget: "user:ou_xxx",
+      deliveredAt: Date.now(),
+    }),
+    timestamp: Date.now(),
+  });
+  const ackSpoofResult = await ackSpoofPromise;
+  assert.equal(ackSpoofResult.delivered, true);
+
   const timeoutResult = await router.sendInstanceMessage("bob@def.456", "timeout");
   assert.equal(timeoutResult.sent, true);
   assert.equal(timeoutResult.delivered, false);

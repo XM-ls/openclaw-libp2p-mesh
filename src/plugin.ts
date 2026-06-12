@@ -12,6 +12,7 @@ import type { MeshConfig } from "./types.js";
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
   const config = api.pluginConfig as MeshConfig | undefined;
   let unsubscribeInbound: (() => void) | undefined;
+  let serviceStarted = false;
   const mesh = createMeshNetwork({
     config,
     logger: api.logger,
@@ -30,6 +31,10 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
   api.registerService({
     id: "libp2p-mesh",
     start: async () => {
+      if (serviceStarted) {
+        api.logger.debug?.("[libp2p-mesh] Service already started; ignoring duplicate start.");
+        return;
+      }
       await mesh.start();
       await router.start();
       unsubscribeInbound = mesh.onMessage((msg) => {
@@ -56,12 +61,14 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
           `[libp2p-mesh] Active relay reservations: ${nat.reservedRelays.join(", ")}`,
         );
       }
+      serviceStarted = true;
     },
     stop: async () => {
       unsubscribeInbound?.();
       unsubscribeInbound = undefined;
       await router.stop();
       await mesh.stop();
+      serviceStarted = false;
       api.logger.info?.("[libp2p-mesh] Service stopped.");
     },
   });
