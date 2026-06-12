@@ -1,44 +1,44 @@
-# libp2p-mesh Instance Routing Design
+# libp2p-mesh Instance 路由设计
 
-Date: 2026-06-12
+日期：2026-06-12
 
-## Purpose
+## 目标
 
-Extend the existing `libp2p-mesh` OpenClaw plugin so OpenClaw instances can address each other by `instanceId`, not by raw libp2p `peerId`.
+扩展现有 `libp2p-mesh` OpenClaw 插件，让 OpenClaw 实例之间可以通过 `instanceId` 互相寻址，而不是要求用户或 Agent 直接使用 libp2p 的 `peerId`。
 
-The first target flow is Feishu:
+第一版目标场景是飞书：
 
-1. User A tells botA in Feishu to send a message to a target `instanceId`.
-2. botA's OpenClaw agent calls a plugin tool.
-3. The plugin resolves `instanceId -> peerId` from its local instance peer table.
-4. The message is sent over libp2p to botB's OpenClaw instance.
-5. botB forwards the inbound P2P message to its configured Feishu target.
-6. botB returns an ACK only after the Feishu channel forwarding succeeds.
-7. botA reports the delivery result to user A.
+1. 用户 A 在飞书中告诉 botA：给某个目标 `instanceId` 发消息。
+2. botA 所属 OpenClaw 的 Agent 调用插件工具。
+3. 插件从本地 instance peer 映射表中解析 `instanceId -> peerId`。
+4. 消息通过 libp2p 发送到 botB 所属 OpenClaw 实例。
+5. botB 把收到的 P2P 入站消息转发到自己配置的飞书目标。
+6. 只有当 botB 成功完成飞书 channel 转发后，才向 botA 返回 ACK。
+7. botA 把投递结果返回给用户 A。
 
-One OpenClaw instance represents one user. The plugin does not resolve human names such as "user B"; users or agents address remote instances by explicit `instanceId`.
+一个 OpenClaw 实例对应一个用户。插件不负责把“用户 B”这类自然语言名字解析成实例；用户或 Agent 需要明确使用远端 `instanceId`。
 
-## Existing Project Context
+## 现有项目上下文
 
-The current plugin already has:
+当前插件已经具备：
 
-- libp2p lifecycle management in `src/mesh.ts`.
-- Peer discovery through mDNS, bootstrap, DHT, NAT traversal, and relay support.
-- Persistent local `InstanceIdentity` in `~/.openclaw/libp2p/instance-id.json`.
-- Signed P2P messages with `instanceId`, `pubkey`, and `signature`.
-- DHT pubkey registration and lookup in `src/dht-registry.ts`.
-- OpenClaw plugin registration in `index.ts` and `src/plugin.ts`.
-- Agent tool registration through `api.registerTool()` in `src/plugin.ts`.
-- Current tools in `src/agent-tools.ts`, including `p2p_send_message(peerId, message)`.
-- A `libp2p-mesh` channel surface in `src/channel.ts`.
+- `src/mesh.ts` 中的 libp2p 生命周期管理。
+- 通过 mDNS、bootstrap、DHT、NAT traversal 和 relay 进行 peer discovery。
+- 本地持久化 `InstanceIdentity`，路径为 `~/.openclaw/libp2p/instance-id.json`。
+- 带 `instanceId`、`pubkey` 和 `signature` 的签名 P2P 消息。
+- `src/dht-registry.ts` 中的 DHT pubkey 注册和查询。
+- `index.ts` 和 `src/plugin.ts` 中的 OpenClaw 插件注册。
+- `src/plugin.ts` 中通过 `api.registerTool()` 注册 Agent 工具。
+- `src/agent-tools.ts` 中的现有工具，包括 `p2p_send_message(peerId, message)`。
+- `src/channel.ts` 中的 `libp2p-mesh` channel 表面。
 
-The missing layer is an instance routing layer that exchanges and persists `instanceId <-> peerId` mappings, then exposes first-class tools for agent use.
+当前缺少的是 instance 路由层：自动交换并持久化 `instanceId <-> peerId` 映射，然后把它暴露为 Agent 可直接使用的一等工具。
 
-## Configuration
+## 配置
 
-Users do not configure tools individually in `openclaw.json`. Tools are registered automatically when the plugin is enabled.
+用户不需要在 `openclaw.json` 中逐个配置工具。插件启用后会自动注册工具。
 
-First-version user config:
+第一版用户配置：
 
 ```json
 {
@@ -61,41 +61,41 @@ First-version user config:
 }
 ```
 
-New config keys:
+新增配置项：
 
-- `inboundChannel`: channel used to display inbound P2P user messages, for example `"feishu"`.
-- `inboundTarget`: channel target used for the local user's inbound display, for example `user:ou_xxx`, `chat:oc_xxx`, `open_id:ou_xxx`, bare `ou_xxx` or `oc_xxx`, and existing `feishu:` / `lark:` provider-prefixed target formats.
-- `deliveryAckTimeoutMs`: how long `p2p_send_instance_message` waits for a remote `delivery-ack`. Default: `15000`.
+- `inboundChannel`：用于显示 P2P 入站用户消息的 channel，例如 `"feishu"`。
+- `inboundTarget`：本实例用户接收入站消息的 channel target，例如 `user:ou_xxx`、`chat:oc_xxx`、`open_id:ou_xxx`、裸 `ou_xxx` 或 `oc_xxx`，以及现有 `feishu:` / `lark:` provider 前缀格式。
+- `deliveryAckTimeoutMs`：`p2p_send_instance_message` 等待远端 `delivery-ack` 的时间。默认值：`15000`。
 
-Internal state path:
+内部状态路径：
 
-- Prefer `$OPENCLAW_STATE_DIR/libp2p/instance-peer.json`.
-- Otherwise use `~/.openclaw/libp2p/instance-peer.json`.
+- 优先使用 `$OPENCLAW_STATE_DIR/libp2p/instance-peer.json`。
+- 否则使用 `~/.openclaw/libp2p/instance-peer.json`。
 
-This path is not a user-facing config option. Tests may override it through an internal constructor option or test environment setup.
+该路径不是用户配置项。测试可以通过内部构造参数或测试环境设置覆盖它。
 
-## Architecture
+## 架构
 
-Add an `InstanceRouter` layer between `MeshNetwork` and agent tools.
+在 `MeshNetwork` 和 Agent tools 之间新增 `InstanceRouter` 层。
 
-Responsibilities:
+职责：
 
-- Send this instance's route announcement to connected peers.
-- Receive remote route announcements and update the instance peer table.
-- Resolve `instanceId -> peerId`.
-- Send user messages by `instanceId`.
-- Track pending ACKs for outbound user messages.
-- Forward inbound user messages to the configured OpenClaw channel target.
-- Return delivery ACKs to the sender after channel forwarding succeeds or fails.
+- 向已连接 peers 发送本实例的路由公告。
+- 接收远端路由公告并更新 instance peer 映射表。
+- 解析 `instanceId -> peerId`。
+- 通过 `instanceId` 发送用户消息。
+- 跟踪出站用户消息的 pending ACK。
+- 把入站用户消息转发到配置的 OpenClaw channel target。
+- 在 channel 转发成功或失败后，把 delivery ACK 返回给发送方。
 
-Suggested modules:
+建议模块：
 
-- `src/instance-peer-store.ts`: persistent `instance-peer.json` read/write logic.
-- `src/instance-router.ts`: announce, resolve, ACK tracking, inbound user-message handling.
-- `src/inbound-delivery.ts`: adapter that invokes the existing OpenClaw message-send capability.
-- `src/agent-tools.ts`: add instance-level tools while keeping existing peer-level tools.
+- `src/instance-peer-store.ts`：负责 `instance-peer.json` 的持久化读写。
+- `src/instance-router.ts`：负责 announce、resolve、ACK 跟踪和入站 `user-message` 处理。
+- `src/inbound-delivery.ts`：适配现有 OpenClaw message-send 能力。
+- `src/agent-tools.ts`：新增 instance 级工具，同时保留现有 peer 级工具。
 
-The inbound delivery adapter should hide the first-version delivery mechanism. Today it is equivalent to:
+入站 delivery adapter 应隐藏第一版的具体投递机制。当前它等价于：
 
 ```bash
 openclaw message send \
@@ -104,17 +104,17 @@ openclaw message send \
   --message "<text>"
 ```
 
-If OpenClaw later provides a plugin API such as `deliverInboundMessage()`, the adapter can switch to that without changing the router or tool contract.
+如果后续 OpenClaw 提供类似 `deliverInboundMessage()` 的插件 API，adapter 可以切换到该 API，而无需改变 router 或工具契约。
 
-## Message Types
+## 消息类型
 
-Extend `P2PMessage.type` with:
+扩展 `P2PMessage.type`，新增：
 
-- `instance-announce`: route announcement.
-- `user-message`: business message sent from one user instance to another.
-- `delivery-ack`: delivery result for a previous `user-message`.
+- `instance-announce`：路由公告。
+- `user-message`：从一个用户实例发送到另一个用户实例的业务消息。
+- `delivery-ack`：针对某条 `user-message` 的投递结果。
 
-`instance-announce` payload fields:
+`instance-announce` payload 字段：
 
 ```json
 {
@@ -127,7 +127,7 @@ Extend `P2PMessage.type` with:
 }
 ```
 
-`user-message` payload fields:
+`user-message` payload 字段：
 
 ```json
 {
@@ -143,7 +143,7 @@ Extend `P2PMessage.type` with:
 }
 ```
 
-`delivery-ack` payload fields:
+`delivery-ack` payload 字段：
 
 ```json
 {
@@ -155,7 +155,7 @@ Extend `P2PMessage.type` with:
 }
 ```
 
-Failure ACKs use `ok: false` and include an error summary:
+失败 ACK 使用 `ok: false`，并包含错误摘要：
 
 ```json
 {
@@ -168,25 +168,25 @@ Failure ACKs use `ok: false` and include an error summary:
 }
 ```
 
-Messages continue to use the existing signing fields: `instanceId`, `pubkey`, and `signature`.
+消息继续使用现有签名字段：`instanceId`、`pubkey` 和 `signature`。
 
-## Announce Flow
+## Announce 流程
 
-No periodic announce loop in the first version.
+第一版不做周期性 announce。
 
-Announce behavior:
+Announce 行为：
 
-1. After local mesh startup completes, send this instance's `instance-announce` once.
-2. On each `peer:connect`, send this instance's `instance-announce` to that peer once.
-3. When receiving a remote `instance-announce`, update the local peer table.
-4. If this instance has not announced itself to that peer yet, send one announce in response.
-5. Do not resend unchanged announcements on an interval.
+1. 本地 mesh 启动完成后，发送一次本实例的 `instance-announce`。
+2. 每次 `peer:connect` 时，向该 peer 发送一次本实例的 `instance-announce`。
+3. 收到远端 `instance-announce` 时，更新本地 peer 映射表。
+4. 如果本实例还没有向该 peer 发送过 announce，则回发一次本机 announce。
+5. 不按固定 interval 重发未变化的公告。
 
-This keeps logs readable while still populating the table during startup, reconnects, and first contact.
+这样可以在启动、重连和首次接触时填充映射表，同时避免日志被周期公告刷屏。
 
-## Instance Peer Table
+## Instance Peer 映射表
 
-`instance-peer.json` structure:
+`instance-peer.json` 结构：
 
 ```json
 {
@@ -207,18 +207,18 @@ This keeps logs readable while still populating the table during startup, reconn
 }
 ```
 
-Persistence rules:
+持久化规则：
 
-- Create the file automatically after the first discovered remote instance.
-- Use atomic writes: write a temporary file, then rename it.
-- If the same `instanceId` announces a new `peerId`, replace the peer and update timestamps.
-- If the same `peerId` appears under multiple `instanceId` values, keep both and log a warning.
-- Do not automatically delete old entries in the first version; use `lastSeenAt` to show freshness.
-- If the JSON file is corrupt at startup, rename it to `.corrupt-<timestamp>` and create a clean empty table.
+- 第一次发现远端实例后自动创建文件。
+- 使用原子写入：先写临时文件，再 rename。
+- 如果同一个 `instanceId` 公告了新的 `peerId`，替换旧 peer 并更新时间戳。
+- 如果同一个 `peerId` 出现在多个 `instanceId` 下，保留全部记录并打印 warning。
+- 第一版不自动删除旧记录；通过 `lastSeenAt` 表示新鲜度。
+- 如果启动时 JSON 文件损坏，将其重命名为 `.corrupt-<timestamp>`，并创建新的空表。
 
-## Agent Tools
+## Agent 工具
 
-Keep existing tools:
+保留现有工具：
 
 - `p2p_send_message(peerId, message)`
 - `p2p_broadcast(topic, message)`
@@ -226,13 +226,13 @@ Keep existing tools:
 - `p2p_get_instance_identity()`
 - `p2p_get_network_info()`
 
-Add:
+新增工具：
 
 ### `p2p_list_instances()`
 
-Lists known instances from `instance-peer.json`.
+列出 `instance-peer.json` 中已知的实例。
 
-Returned details include:
+返回详情包括：
 
 - `instanceId`
 - `peerId`
@@ -242,24 +242,24 @@ Returned details include:
 
 ### `p2p_resolve_instance({ instanceId })`
 
-Looks up a single `instanceId`.
+查询单个 `instanceId`。
 
-If found, returns the current route details. If not found, returns `isError: true` with a message such as:
+如果找到，返回当前路由详情。如果没找到，返回 `isError: true`，错误信息类似：
 
 `Instance <id> has not been discovered. Ask the user to confirm the remote gateway is running and connected to the same P2P network.`
 
 ### `p2p_send_instance_message({ instanceId, message })`
 
-Primary tool for agents.
+Agent 应优先使用的主工具。
 
-Behavior:
+行为：
 
-1. Resolve `instanceId` from `instance-peer.json`.
-2. Send a signed `user-message` to the resolved `peerId`.
-3. Wait for `delivery-ack` up to `deliveryAckTimeoutMs`.
-4. Return success only when the remote instance reports successful forwarding to its configured inbound channel.
+1. 从 `instance-peer.json` 解析 `instanceId`。
+2. 向解析出的 `peerId` 发送签名 `user-message`。
+3. 最多等待 `deliveryAckTimeoutMs` 时间接收 `delivery-ack`。
+4. 只有当远端实例报告已成功转发到其配置的 inbound channel 时，才返回成功。
 
-Success result shape:
+成功返回结构：
 
 ```json
 {
@@ -272,137 +272,137 @@ Success result shape:
 }
 ```
 
-Failure modes return `isError: true` and include structured details.
+失败模式返回 `isError: true`，并包含结构化 details。
 
-## OpenClaw Registration
+## OpenClaw 注册
 
-OpenClaw discovers the plugin through the existing package/plugin metadata:
+OpenClaw 通过现有 package/plugin 元数据发现插件：
 
-- `package.json.openclaw.extensions` points to `./dist/index.js`.
-- `index.ts` exports the `definePluginEntry()` entry.
-- `src/plugin.ts` registers service, channel, tools, and hooks.
-- `openclaw.plugin.json` describes plugin metadata and contracts.
+- `package.json.openclaw.extensions` 指向 `./dist/index.js`。
+- `index.ts` 导出 `definePluginEntry()` 入口。
+- `src/plugin.ts` 注册 service、channel、tools 和 hooks。
+- `openclaw.plugin.json` 描述插件元数据和 contracts。
 
-Required metadata updates:
+需要更新的元数据：
 
-- Add new config schema entries:
+- 新增 config schema 字段：
   - `inboundChannel`
   - `inboundTarget`
   - `deliveryAckTimeoutMs`
-- Add new contract tools:
+- 新增 contract tools：
   - `p2p_list_instances`
   - `p2p_resolve_instance`
   - `p2p_send_instance_message`
 
-Users do not add tool lists to `openclaw.json`. Enabling the plugin is enough for `registerLibp2pMesh(api)` to call `api.registerTool()` and expose the tools to OpenClaw/Agent.
+用户不需要在 `openclaw.json` 中添加工具列表。只要启用插件，`registerLibp2pMesh(api)` 就会调用 `api.registerTool()`，把工具暴露给 OpenClaw/Agent。
 
-## Inbound Delivery and Auto Reply
+## 入站投递与自动回复
 
-Inbound P2P `user-message` handling:
+入站 P2P `user-message` 处理：
 
-1. Verify message format and signature.
-2. Confirm the message targets this local `instanceId`.
-3. Forward the text to `config.inboundChannel` and `config.inboundTarget`.
-4. If forwarding succeeds, send `delivery-ack { ok: true }`.
-5. If forwarding fails, send `delivery-ack { ok: false, error }`.
+1. 校验消息格式和签名。
+2. 确认消息目标是本地 `instanceId`。
+3. 将文本转发到 `config.inboundChannel` 和 `config.inboundTarget`。
+4. 如果转发成功，发送 `delivery-ack { ok: true }`。
+5. 如果转发失败，发送 `delivery-ack { ok: false, error }`。
 
-Auto-reply policy:
+自动回复策略：
 
-- The plugin does not decide whether to auto-call an agent to reply.
-- The plugin passes metadata such as `allowAgentAutoReply`, `replyToInstanceId`, and `replyTool`.
-- OpenClaw or the receiving agent may use that metadata to decide whether to respond.
-- The first version must not introduce automatic agent-to-agent reply loops.
+- 插件不判断是否自动调用 Agent 回复。
+- 插件传递 `allowAgentAutoReply`、`replyToInstanceId` 和 `replyTool` 等 metadata。
+- OpenClaw 或接收端 Agent 可以基于这些 metadata 决定是否回复。
+- 第一版不能引入 Agent 之间自动互相回复的循环。
 
-## Error Handling
+## 错误处理
 
-- Unknown `instanceId`: return tool error before sending.
-- P2P send failure: return tool error with target `peerId` and error summary.
-- ACK timeout: return tool error `ACK timeout after <deliveryAckTimeoutMs>ms`.
-- Missing `inboundChannel` or `inboundTarget` on receiver: receiver returns failed ACK.
-- Inbound channel forwarding failure: receiver returns failed ACK with channel, target, and error summary.
-- Invalid signature or malformed payload: reject the message, do not update state, and log a warning.
-- Duplicate `user-message`: do not forward to Feishu twice. If a prior delivery result is known, resend the same ACK.
+- 未知 `instanceId`：发送前直接返回工具错误。
+- P2P 发送失败：返回工具错误，包含目标 `peerId` 和错误摘要。
+- ACK 超时：返回工具错误 `ACK timeout after <deliveryAckTimeoutMs>ms`。
+- 接收端缺少 `inboundChannel` 或 `inboundTarget`：接收端返回失败 ACK。
+- 入站 channel 转发失败：接收端返回失败 ACK，包含 channel、target 和错误摘要。
+- 签名无效或 payload 格式错误：拒绝处理，不更新状态，并打印 warning。
+- 重复 `user-message`：不重复转发到飞书；如果已有上一次投递结果，则重复发送同一个 ACK。
 
-## Logging
+## 日志
 
-Important runtime status must be visible at `info` level.
+关键运行状态必须在 `info` 级别可见。
 
-Change existing logging expectations:
+需要调整现有日志预期：
 
-- `peer:connect` should log at `info`, not `debug`.
-- `peer:disconnect` should log at `info`, not `debug`.
-- First-time `instance-announce` send should log at `info`.
-- First-time remote announce receive and table update should log at `info`.
-- Idempotent duplicate announce with no data change should not log at `info`; keep it silent or `debug`.
-- Low-level details such as relay pre-dial attempts, DHT internals, and duplicate-message suppression stay at `debug`.
+- `peer:connect` 应使用 `info` 级别，而不是 `debug`。
+- `peer:disconnect` 应使用 `info` 级别，而不是 `debug`。
+- 第一次发送 `instance-announce` 应使用 `info` 级别。
+- 第一次接收远端 announce 并更新映射表应使用 `info` 级别。
+- 内容没有变化的重复 announce 不应在 `info` 级别打印；可以静默或使用 `debug`。
+- relay pre-dial 尝试、DHT 内部事件、重复消息去重等底层细节继续使用 `debug`。
 
-README troubleshooting should state that users should see peer connection and instance mapping logs in normal terminal output.
+README 排障部分应说明：用户在正常终端输出中应能看到 peer connection 和 instance mapping update 日志。
 
-## Testing
+## 测试
 
-### Unit Tests
+### 单元测试
 
-`InstancePeerStore`:
+`InstancePeerStore`：
 
-- Creates an empty table when no file exists.
-- Reads existing table.
-- Atomically writes updates.
-- Backs up corrupt JSON.
-- Replaces `peerId` for the same `instanceId`.
-- Warns when one `peerId` maps to multiple `instanceId` values.
+- 文件不存在时创建空表。
+- 读取已有表。
+- 原子写入更新。
+- 备份损坏 JSON。
+- 同一 `instanceId` 下替换 `peerId`。
+- 一个 `peerId` 映射到多个 `instanceId` 时打印 warning。
 
-`InstanceRouter`:
+`InstanceRouter`：
 
-- Sends announce on startup and peer connect.
-- Updates store on remote announce.
-- Does not log noisy info output for duplicate unchanged announce.
-- Resolves known and unknown instances.
-- Tracks ACK pending map success and timeout.
-- Deduplicates inbound `user-message`.
+- 启动和 peer connect 时发送 announce。
+- 收到远端 announce 时更新 store。
+- 对未变化的重复 announce 不打印嘈杂的 info 日志。
+- 正确解析已知和未知实例。
+- 正确处理 ACK pending map 的成功和超时。
+- 对入站 `user-message` 去重。
 
-Tools:
+工具：
 
-- `p2p_list_instances` returns known rows.
-- `p2p_resolve_instance` succeeds and fails correctly.
-- `p2p_send_instance_message` returns delivered success on ACK and error on timeout/failure ACK.
+- `p2p_list_instances` 返回已知记录。
+- `p2p_resolve_instance` 成功和失败都正确。
+- `p2p_send_instance_message` 在收到 ACK 时返回 delivered success，在超时或失败 ACK 时返回 error。
 
-### Local Integration
+### 本地集成测试
 
-Run two mesh instances with separate state dirs:
+用不同 state dir 启动两个 mesh 实例：
 
-- Verify both create `libp2p/instance-peer.json`.
-- Verify both learn each other's `instanceId` and `peerId`.
-- Send A -> B by `instanceId`.
-- Mock B inbound delivery adapter as successful.
-- Verify A receives delivered ACK.
+- 验证双方都创建 `libp2p/instance-peer.json`。
+- 验证双方都学习到对方的 `instanceId` 和 `peerId`。
+- 通过 `instanceId` 从 A 发送到 B。
+- B 使用 mock inbound delivery adapter 模拟转发成功。
+- 验证 A 收到 delivered ACK。
 
-### NAT/Docker Regression
+### NAT/Docker 回归
 
-Extend existing `test/nat-docker` configs:
+扩展现有 `test/nat-docker` 配置：
 
-- Add `inboundChannel`, `inboundTarget`, and `deliveryAckTimeoutMs`.
-- Verify relay/NAT path supports announce and user-message delivery.
+- 增加 `inboundChannel`、`inboundTarget` 和 `deliveryAckTimeoutMs`。
+- 验证 relay/NAT 路径下 announce 和 user-message 都能正常投递。
 
-## Documentation Updates
+## 文档更新
 
-Update README with:
+更新 README：
 
-- Installation and `openclaw.json` config showing `inboundChannel`, `inboundTarget`, and `deliveryAckTimeoutMs`.
-- Explanation that `instance-peer.json` is generated automatically and is not configured by users.
-- Explanation that tools are automatically registered by the plugin; users do not list tools in `openclaw.json`.
-- Feishu example:
-  - User asks botA to send to an explicit `instanceId`.
-  - Agent calls `p2p_send_instance_message`.
-  - botB forwards to Feishu target.
-  - botA receives ACK after remote channel forwarding succeeds.
-- Troubleshooting note that normal logs should show peer connections and instance mapping updates at info level.
+- 安装和 `openclaw.json` 配置示例，包含 `inboundChannel`、`inboundTarget` 和 `deliveryAckTimeoutMs`。
+- 说明 `instance-peer.json` 会自动生成，不需要用户配置。
+- 说明工具由插件自动注册，用户不需要在 `openclaw.json` 中列出工具。
+- 飞书示例：
+  - 用户要求 botA 给明确的 `instanceId` 发送消息。
+  - Agent 调用 `p2p_send_instance_message`。
+  - botB 转发到 Feishu target。
+  - botA 在远端 channel 转发成功后收到 ACK。
+- 排障说明：正常日志应在 info 级别显示 peer connection 和 instance mapping update。
 
-## Out of Scope
+## 不在第一版范围内
 
-- Human name or contact alias resolution.
-- User-managed contact book.
-- Periodic route announcement.
-- Automatic deletion of stale instance routes.
-- Plugin-owned agent auto-reply decisions.
-- Requiring users to configure plugin tools in `openclaw.json`.
-- Changing OpenClaw core SDK unless the existing message-send capability is insufficient.
+- 自然语言人名或联系人别名解析。
+- 用户维护的通讯录。
+- 周期性路由公告。
+- 自动删除过期 instance 路由。
+- 插件自行决定 Agent 自动回复。
+- 要求用户在 `openclaw.json` 中配置插件工具。
+- 除非现有 message-send 能力不足，否则不修改 OpenClaw core SDK。
