@@ -3,6 +3,7 @@
  * Spins up two mesh nodes on the loopback interface via bootstrap discovery
  * and verifies direct messaging, broadcast, and peer listing.
  */
+import crypto from "node:crypto";
 import { createMeshNetwork } from "./src/mesh.js";
 
 const LOG = process.env.VERBOSE === "1";
@@ -14,6 +15,8 @@ async function delay(ms) {
 async function runTests() {
   let passed = 0;
   let failed = 0;
+  const logsA = [];
+  const logsB = [];
 
   function assert(cond, msg) {
     if (cond) {
@@ -36,7 +39,10 @@ async function runTests() {
       peerIdPath: "/tmp/openclaw-mesh-test-peer-a.json",
     },
     logger: {
-      info: LOG ? (m) => console.log(`[A] ${m}`) : () => {},
+      info: (m) => {
+        logsA.push(m);
+        if (LOG) console.log(`[A] ${m}`);
+      },
       debug: LOG ? (m) => console.log(`[A] ${m}`) : () => {},
       error: (m) => console.error(`[A] ${m}`),
     },
@@ -62,7 +68,10 @@ async function runTests() {
       peerIdPath: "/tmp/openclaw-mesh-test-peer-b.json",
     },
     logger: {
-      info: LOG ? (m) => console.log(`[B] ${m}`) : () => {},
+      info: (m) => {
+        logsB.push(m);
+        if (LOG) console.log(`[B] ${m}`);
+      },
       debug: LOG ? (m) => console.log(`[B] ${m}`) : () => {},
       error: (m) => console.error(`[B] ${m}`),
     },
@@ -92,6 +101,10 @@ async function runTests() {
 
   assert(peersA.includes(peerIdB), "A is connected to B");
   assert(peersB.includes(peerIdA), "B is connected to A");
+  assert(
+    logsA.some((m) => m.includes("Peer connected")) || logsB.some((m) => m.includes("Peer connected")),
+    "Peer connection is logged at info level"
+  );
 
   // ---------- Test 1: Direct message A -> B ----------
   console.log("\n[Test 1] Direct message from A to B...");
@@ -111,6 +124,30 @@ async function runTests() {
   assert(receivedByB[0].payload === "Hello from A!", "Message payload is correct");
   assert(typeof receivedByB[0].id === "string" && receivedByB[0].id.length > 0, "Message has a valid ID");
   assert(typeof receivedByB[0].timestamp === "number", "Message has a timestamp");
+
+  // ---------- Test 1b: Structured message A -> B ----------
+  console.log("\n[Test 1b] Structured instance announce from A to B...");
+
+  const structuredBefore = receivedByB.length;
+  await nodeA.sendStructuredMessage(peerIdB, {
+    id: crypto.randomUUID(),
+    type: "instance-announce",
+    to: peerIdB,
+    payload: JSON.stringify({
+      instanceId: "test-instance-a",
+      peerId: peerIdA,
+      instanceName: "test-a",
+      multiaddrs: nodeA.getMultiaddrs(),
+      announcedAt: Date.now(),
+    }),
+  });
+  await delay(500);
+
+  const structuredMessages = receivedByB
+    .slice(structuredBefore)
+    .filter((m) => m.type === "instance-announce");
+  assert(structuredMessages.length === 1, "B received one instance-announce message");
+  assert(structuredMessages[0]?.from === peerIdA, "Structured message sender is A's Peer ID");
 
   // ---------- Test 2: Direct message B -> A ----------
   console.log("\n[Test 2] Direct message from B to A...");

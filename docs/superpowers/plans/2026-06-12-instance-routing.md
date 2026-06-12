@@ -267,7 +267,7 @@ git commit -m "feat: define instance routing contracts"
 - 修改：`test-mesh-core.mjs`
 - 通过命令测试：`node --import tsx test-mesh-core.mjs`
 
-- [ ] **步骤 1：扩展 mesh core 测试以覆盖结构化消息**
+- [x] **步骤 1：扩展 mesh core 测试以覆盖结构化消息**
 
 在 `test-mesh-core.mjs` 的现有 direct message 测试之后，增加结构化消息检查：
 
@@ -344,7 +344,7 @@ git commit -m "feat: define instance routing contracts"
   );
 ```
 
-- [ ] **步骤 2：运行测试以确认当前失败**
+- [x] **步骤 2：运行测试以确认当前失败**
 
 运行：
 
@@ -354,7 +354,7 @@ node --import tsx test-mesh-core.mjs
 
 预期：失败，错误为 `nodeA.sendStructuredMessage is not a function` 或等价错误。
 
-- [ ] **步骤 3：实现 mesh 结构化发送和 peer event 订阅**
+- [x] **步骤 3：实现 mesh 结构化发送和 peer event 订阅**
 
 在 `src/mesh.ts` 中，在 `messageHandlers` 附近增加 handler sets：
 
@@ -511,7 +511,7 @@ node --import tsx test-mesh-core.mjs
 
 从 `createMeshNetwork` 返回这些新方法。
 
-- [ ] **步骤 4：运行 mesh 测试**
+- [x] **步骤 4：运行 mesh 测试**
 
 运行：
 
@@ -521,7 +521,7 @@ node --import tsx test-mesh-core.mjs
 
 预期：`All tests passed!`
 
-- [ ] **步骤 5：运行 build**
+- [x] **步骤 5：运行 build**
 
 ```bash
 pnpm build
@@ -529,7 +529,7 @@ pnpm build
 
 预期：没有 TypeScript 错误。
 
-- [ ] **步骤 6：提交 mesh API 和 info 日志变更**
+- [x] **步骤 6：提交 mesh API 和 info 日志变更**
 
 ```bash
 git add src/mesh.ts test-mesh-core.mjs

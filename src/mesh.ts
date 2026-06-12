@@ -93,6 +93,8 @@ export function createMeshNetwork(options: {
 
   const seenMessages = new Set<string>();
   const messageHandlers = new Set<(msg: P2PMessage) => void>();
+  const peerConnectHandlers = new Set<(peerId: string) => void>();
+  const peerDisconnectHandlers = new Set<(peerId: string) => void>();
   const topicHandlers = new Map<string, Set<(msg: string) => void>>();
 
   function getDHTService(): ReturnType<typeof kadDHT> extends (components: infer C) => infer R ? R : never | undefined {
@@ -257,12 +259,26 @@ export function createMeshNetwork(options: {
 
     state.node.addEventListener("peer:connect", (evt) => {
       const peerIdStr = evt.detail.toString();
-      logger?.debug?.(`[libp2p-mesh] Peer connected: ${peerIdStr}`);
+      logger?.info?.(`[libp2p-mesh] Peer connected: ${peerIdStr}`);
+      for (const handler of peerConnectHandlers) {
+        try {
+          handler(peerIdStr);
+        } catch (err) {
+          logger?.error?.(`[libp2p-mesh] Peer connect handler error: ${String(err)}`);
+        }
+      }
     });
 
     state.node.addEventListener("peer:disconnect", (evt) => {
       const peerIdStr = evt.detail.toString();
-      logger?.debug?.(`[libp2p-mesh] Peer disconnected: ${peerIdStr}`);
+      logger?.info?.(`[libp2p-mesh] Peer disconnected: ${peerIdStr}`);
+      for (const handler of peerDisconnectHandlers) {
+        try {
+          handler(peerIdStr);
+        } catch (err) {
+          logger?.error?.(`[libp2p-mesh] Peer disconnect handler error: ${String(err)}`);
+        }
+      }
     });
 
     await state.node.handle(
@@ -464,19 +480,10 @@ export function createMeshNetwork(options: {
     return msg;
   }
 
-  async function sendToPeer(peerId: string, message: string): Promise<void> {
+  async function writeMessageToPeer(peerId: string, msg: P2PMessage): Promise<void> {
     if (!state.node) {
       throw new Error("Mesh network is not started");
     }
-
-    const msg = buildSignedMessage({
-      id: crypto.randomUUID(),
-      type: "direct",
-      from: state.node.peerId.toString(),
-      to: peerId,
-      payload: message,
-      timestamp: Date.now(),
-    });
 
     const data = new TextEncoder().encode(JSON.stringify(msg));
 
@@ -541,6 +548,40 @@ export function createMeshNetwork(options: {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async function sendToPeer(peerId: string, message: string): Promise<void> {
+    if (!state.node) {
+      throw new Error("Mesh network is not started");
+    }
+
+    const msg = buildSignedMessage({
+      id: crypto.randomUUID(),
+      type: "direct",
+      from: state.node.peerId.toString(),
+      to: peerId,
+      payload: message,
+      timestamp: Date.now(),
+    });
+
+    await writeMessageToPeer(peerId, msg);
+  }
+
+  async function sendStructuredMessage(
+    peerId: string,
+    message: Omit<P2PMessage, "from" | "timestamp" | "instanceId" | "pubkey" | "signature"> & { timestamp?: number },
+  ): Promise<void> {
+    if (!state.node) {
+      throw new Error("Mesh network is not started");
+    }
+
+    const msg = buildSignedMessage({
+      ...message,
+      from: state.node.peerId.toString(),
+      timestamp: message.timestamp ?? Date.now(),
+    });
+
+    await writeMessageToPeer(peerId, msg);
   }
 
   async function publishToTopic(topic: string, message: string): Promise<void> {
@@ -610,6 +651,20 @@ export function createMeshNetwork(options: {
     };
   }
 
+  function onPeerConnect(handler: (peerId: string) => void): () => void {
+    peerConnectHandlers.add(handler);
+    return () => {
+      peerConnectHandlers.delete(handler);
+    };
+  }
+
+  function onPeerDisconnect(handler: (peerId: string) => void): () => void {
+    peerDisconnectHandlers.add(handler);
+    return () => {
+      peerDisconnectHandlers.delete(handler);
+    };
+  }
+
   async function subscribeToTopic(topic: string, handler: (msg: string) => void): Promise<void> {
     if (!topicHandlers.has(topic)) {
       topicHandlers.set(topic, new Set());
@@ -666,7 +721,10 @@ export function createMeshNetwork(options: {
     start,
     stop,
     sendToPeer,
+    sendStructuredMessage,
     onMessage,
+    onPeerConnect,
+    onPeerDisconnect,
     publishToTopic,
     subscribeToTopic,
     getLocalPeerId,
