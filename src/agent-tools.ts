@@ -1,6 +1,6 @@
-import type { MeshNetwork } from "./types.js";
+import type { InstanceRouter, MeshNetwork } from "./types.js";
 
-export function buildP2PTools(mesh: MeshNetwork) {
+export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
   return [
     {
       name: "p2p_send_message",
@@ -189,6 +189,161 @@ export function buildP2PTools(mesh: MeshNetwork) {
             isError: true,
           };
         }
+      },
+    },
+    {
+      name: "p2p_list_instances",
+      label: "P2P List Instances",
+      description: "List OpenClaw instances discovered through the P2P mesh instance routing table.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute(_toolCallId: string) {
+        if (!router) {
+          return {
+            content: [{ type: "text" as const, text: "Instance router is not initialized." }],
+            details: { initialized: false },
+            isError: true,
+          };
+        }
+        try {
+          const instances = await router.listInstances();
+          const connected = new Set(mesh.getConnectedPeers());
+          const rows = instances.map((entry) => ({
+            ...entry,
+            connected: connected.has(entry.peerId),
+          }));
+          const text =
+            rows.length === 0
+              ? "No OpenClaw instances discovered yet."
+              : rows
+                  .map(
+                    (entry) =>
+                      `${entry.instanceId} -> ${entry.peerId}${entry.connected ? " (connected)" : ""}`,
+                  )
+                  .join("\n");
+          return {
+            content: [{ type: "text" as const, text }],
+            details: { instances: rows, count: rows.length },
+          };
+        } catch (err) {
+          return {
+            content: [
+              { type: "text" as const, text: `Failed to list instances: ${String(err)}` },
+            ],
+            details: { error: String(err) },
+            isError: true,
+          };
+        }
+      },
+    },
+    {
+      name: "p2p_resolve_instance",
+      label: "P2P Resolve Instance",
+      description: "Resolve an OpenClaw instance ID to the current libp2p Peer ID route.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          instanceId: {
+            type: "string" as const,
+            description: "Target OpenClaw instance ID",
+          },
+        },
+        required: ["instanceId"],
+      },
+      async execute(_toolCallId: string, params: { instanceId: string }) {
+        if (!router) {
+          return {
+            content: [{ type: "text" as const, text: "Instance router is not initialized." }],
+            details: { initialized: false },
+            isError: true,
+          };
+        }
+        const instanceId = params.instanceId?.trim();
+        if (!instanceId) {
+          return {
+            content: [{ type: "text" as const, text: "instanceId is required." }],
+            details: { error: "instanceId is required" },
+            isError: true,
+          };
+        }
+        const route = await router.resolveInstance(instanceId);
+        if (!route) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Instance ${instanceId} has not been discovered. Ask the user to confirm the remote gateway is running and connected to the same P2P network.`,
+              },
+            ],
+            details: { instanceId, found: false },
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `${route.instanceId} -> ${route.peerId}` }],
+          details: { found: true, route },
+        };
+      },
+    },
+    {
+      name: "p2p_send_instance_message",
+      label: "P2P Send Instance Message",
+      description: "Send a user message to another OpenClaw instance by instance ID and wait for remote channel delivery ACK.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          instanceId: {
+            type: "string" as const,
+            description: "Target OpenClaw instance ID",
+          },
+          message: {
+            type: "string" as const,
+            description: "Message content to send",
+          },
+        },
+        required: ["instanceId", "message"],
+      },
+      async execute(_toolCallId: string, params: { instanceId: string; message: string }) {
+        if (!router) {
+          return {
+            content: [{ type: "text" as const, text: "Instance router is not initialized." }],
+            details: { initialized: false },
+            isError: true,
+          };
+        }
+        const instanceId = params.instanceId?.trim();
+        const message = params.message?.trim();
+        if (!instanceId || !message) {
+          return {
+            content: [{ type: "text" as const, text: "instanceId and message are required." }],
+            details: { error: "instanceId and message are required" },
+            isError: true,
+          };
+        }
+        const result = await router.sendInstanceMessage(instanceId, message);
+        if (!result.delivered) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Failed to deliver message to ${instanceId}: ${result.error ?? "unknown error"}`,
+              },
+            ],
+            details: result,
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Message delivered to ${instanceId} via ${result.inboundChannel ?? "remote inbound channel"}.`,
+            },
+          ],
+          details: result,
+        };
       },
     },
   ];

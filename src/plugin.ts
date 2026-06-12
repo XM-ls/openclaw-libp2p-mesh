@@ -1,14 +1,27 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createLibp2pMeshChannel } from "./channel.js";
 import { handleP2PInbound } from "./inbound.js";
+import { createOpenClawCliInboundDelivery } from "./inbound-delivery.js";
+import { createInstancePeerStore } from "./instance-peer-store.js";
+import { createInstanceRouter } from "./instance-router.js";
 import { createMeshNetwork } from "./mesh.js";
 import { buildP2PTools } from "./agent-tools.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { MeshConfig } from "./types.js";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
+  const config = api.pluginConfig as MeshConfig | undefined;
   const mesh = createMeshNetwork({
-    config: api.pluginConfig as MeshConfig | undefined,
+    config,
+    logger: api.logger,
+  });
+  const store = createInstancePeerStore({ logger: api.logger });
+  const delivery = createOpenClawCliInboundDelivery({ logger: api.logger });
+  const router = createInstanceRouter({
+    mesh,
+    store,
+    delivery,
+    config,
     logger: api.logger,
   });
 
@@ -17,8 +30,11 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
     id: "libp2p-mesh",
     start: async () => {
       await mesh.start();
+      await router.start();
       mesh.onMessage((msg) => {
-        handleP2PInbound(msg, { logger: api.logger });
+        if (msg.type === "direct" || msg.type === "broadcast" || msg.type === "agent-sync") {
+          handleP2PInbound(msg, { logger: api.logger });
+        }
       });
       const identity = mesh.getInstanceIdentity();
       api.logger.info?.(`[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`);
@@ -41,6 +57,7 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
       }
     },
     stop: async () => {
+      await router.stop();
       await mesh.stop();
       api.logger.info?.("[libp2p-mesh] Service stopped.");
     },
@@ -52,7 +69,7 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
   });
 
   // 3. Register Agent Tools
-  const tools = buildP2PTools(mesh);
+  const tools = buildP2PTools(mesh, router);
   for (const tool of tools) {
     api.registerTool(tool as never);
   }

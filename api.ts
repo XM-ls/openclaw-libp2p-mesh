@@ -1,2 +1,19 @@
 export { createMeshNetwork } from "./src/mesh.js";
-export type { MeshNetwork, P2PMessage, MeshConfig, InstanceIdentity } from "./src/types.js";
+export { createInstancePeerStore } from "./src/instance-peer-store.js";
+export { createInstanceRouter } from "./src/instance-router.js";
+export type {
+  DeliveryAckPayload,
+  InboundDeliveryAdapter,
+  InboundDeliveryRequest,
+  InboundDeliveryResult,
+  InstanceAnnouncePayload,
+  InstanceIdentity,
+  InstancePeerRecord,
+  InstancePeerStore,
+  InstancePeerTable,
+  InstanceRouter,
+  MeshConfig,
+  MeshNetwork,
+  P2PMessage,
+  UserMessagePayload,
+} from "./src/types.js";
