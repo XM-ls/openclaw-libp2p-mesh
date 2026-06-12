@@ -39,7 +39,7 @@
 - 修改：`openclaw.plugin.json`
 - 通过命令测试：`pnpm build`
 
-- [ ] **步骤 1：在 `src/types.ts` 中增加 message、route、store、router、delivery 和 config 类型**
+- [x] **步骤 1：在 `src/types.ts` 中增加 message、route、store、router、delivery 和 config 类型**
 
 在现有 interfaces 附近加入这些 exports。保留现有字段并扩展它们，不要删除兼容性表面。
 
@@ -193,7 +193,7 @@ export interface MeshNetwork {
 }
 ```
 
-- [ ] **步骤 2：在 `index.ts` 中增加 config schema 字段**
+- [x] **步骤 2：在 `index.ts` 中增加 config schema 字段**
 
 把这些属性加入 `createLibp2pMeshConfigSchema().jsonSchema.properties`：
 
@@ -213,7 +213,7 @@ export interface MeshNetwork {
         },
 ```
 
-- [ ] **步骤 3：在 `openclaw.plugin.json` 中增加 manifest config 和 tool contracts**
+- [x] **步骤 3：在 `openclaw.plugin.json` 中增加 manifest config 和 tool contracts**
 
 在 `configSchema.properties` 下增加配置属性：
 
@@ -241,7 +241,7 @@ export interface MeshNetwork {
       "p2p_send_instance_message"
 ```
 
-- [ ] **步骤 4：运行 build 以捕获类型和 schema 错误**
+- [x] **步骤 4：运行 build 以捕获类型和 schema 错误**
 
 运行：
 
@@ -251,7 +251,7 @@ pnpm build
 
 预期：如果 TypeScript 错误只来自 `MeshNetwork` 实现还缺少新方法，这一步可以接受。`src/types.ts`、`index.ts` 或 `openclaw.plugin.json` 中的语法错误必须先修复再继续。
 
-- [ ] **步骤 5：提交类型和 manifest contract 变更**
+- [x] **步骤 5：提交类型和 manifest contract 变更**
 
 ```bash
 git add src/types.ts index.ts openclaw.plugin.json

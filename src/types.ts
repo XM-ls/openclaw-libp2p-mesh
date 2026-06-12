@@ -17,9 +17,17 @@ export interface InstanceIdentity {
   createdAt: number;
 }
 
+export type P2PMessageType =
+  | "direct"
+  | "broadcast"
+  | "agent-sync"
+  | "instance-announce"
+  | "user-message"
+  | "delivery-ack";
+
 export interface P2PMessage {
   id: string;
-  type: "direct" | "broadcast" | "agent-sync";
+  type: P2PMessageType;
   from: string;
   to?: string;
   topic?: string;
@@ -31,6 +39,107 @@ export interface P2PMessage {
   pubkey?: string;
   /** Ed25519 signature of the message payload, verifiable with instance pubkey */
   signature?: string;
+}
+
+export interface InstanceAnnouncePayload {
+  instanceId: string;
+  peerId: string;
+  instanceName?: string;
+  multiaddrs: string[];
+  pubkey?: string;
+  announcedAt: number;
+}
+
+export interface UserMessagePayload {
+  messageId: string;
+  fromInstanceId: string;
+  toInstanceId: string;
+  text: string;
+  metadata: {
+    allowAgentAutoReply: boolean;
+    replyToInstanceId: string;
+    replyTool: "p2p_send_instance_message";
+  };
+}
+
+export interface DeliveryAckPayload {
+  ackFor: string;
+  ok: boolean;
+  inboundChannel?: string;
+  inboundTarget?: string;
+  deliveredAt: number;
+  error?: string;
+}
+
+export interface InstancePeerRecord {
+  instanceId: string;
+  peerId: string;
+  instanceName?: string;
+  multiaddrs: string[];
+  pubkey?: string;
+  lastSeenAt: number;
+  lastAnnouncedAt: number;
+  source: "announce";
+}
+
+export interface InstancePeerTable {
+  version: 1;
+  updatedAt: number;
+  instances: Record<string, InstancePeerRecord>;
+}
+
+export interface InstancePeerStore {
+  load(): Promise<InstancePeerTable>;
+  list(): Promise<InstancePeerRecord[]>;
+  resolve(instanceId: string): Promise<InstancePeerRecord | undefined>;
+  upsertFromAnnounce(payload: InstanceAnnouncePayload): Promise<{
+    record: InstancePeerRecord;
+    changed: boolean;
+    peerIdSharedBy: string[];
+  }>;
+}
+
+export interface InboundDeliveryRequest {
+  channel: string;
+  target: string;
+  text: string;
+  metadata: {
+    fromInstanceId: string;
+    fromPeerId: string;
+    p2pMessageId: string;
+    allowAgentAutoReply: boolean;
+    replyToInstanceId: string;
+    replyTool: "p2p_send_instance_message";
+  };
+}
+
+export interface InboundDeliveryResult {
+  ok: boolean;
+  channel: string;
+  target: string;
+  error?: string;
+}
+
+export interface InboundDeliveryAdapter {
+  deliver(request: InboundDeliveryRequest): Promise<InboundDeliveryResult>;
+}
+
+export interface InstanceRouter {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  handleMessage(msg: P2PMessage): Promise<void>;
+  announceToPeer(peerId: string): Promise<void>;
+  listInstances(): Promise<InstancePeerRecord[]>;
+  resolveInstance(instanceId: string): Promise<InstancePeerRecord | undefined>;
+  sendInstanceMessage(instanceId: string, message: string): Promise<{
+    sent: boolean;
+    delivered: boolean;
+    toInstanceId: string;
+    toPeerId: string;
+    ackMessageId?: string;
+    inboundChannel?: string;
+    error?: string;
+  }>;
 }
 
 export interface MeshConfig {
@@ -89,6 +198,9 @@ export interface MeshConfig {
    * forward where AutoNAT cannot probe (e.g. behind a cloud LB).
    */
   announceAddrs?: string[];
+  inboundChannel?: string;
+  inboundTarget?: string;
+  deliveryAckTimeoutMs?: number;
 }
 
 export interface NATTraversalStatus {
@@ -111,7 +223,13 @@ export interface MeshNetwork {
   start(): Promise<void>;
   stop(): Promise<void>;
   sendToPeer(peerId: string, message: string): Promise<void>;
+  sendStructuredMessage(
+    peerId: string,
+    message: Omit<P2PMessage, "from" | "timestamp" | "instanceId" | "pubkey" | "signature"> & { timestamp?: number },
+  ): Promise<void>;
   onMessage(handler: (msg: P2PMessage) => void): () => void;
+  onPeerConnect(handler: (peerId: string) => void): () => void;
+  onPeerDisconnect(handler: (peerId: string) => void): () => void;
   publishToTopic(topic: string, message: string): Promise<void>;
   subscribeToTopic(topic: string, handler: (msg: string) => void): Promise<void>;
   getLocalPeerId(): string;

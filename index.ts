@@ -111,6 +111,19 @@ function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
           items: { type: "string" },
           description: "Extra multiaddrs to announce to the network (useful when running behind a known port forward where AutoNAT cannot probe).",
         },
+        inboundChannel: {
+          type: "string",
+          description: "OpenClaw channel used to display inbound P2P user messages, for example \"feishu\".",
+        },
+        inboundTarget: {
+          type: "string",
+          description: "OpenClaw channel target for inbound P2P user messages, for example user:ou_xxx or chat:oc_xxx.",
+        },
+        deliveryAckTimeoutMs: {
+          type: "number",
+          default: 15000,
+          description: "How long p2p_send_instance_message waits for a remote delivery ACK.",
+        },
       },
     },
   };
