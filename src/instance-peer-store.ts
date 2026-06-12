@@ -1,56 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-
-export interface InstanceAnnouncePayload {
-  instanceId: string;
-  peerId: string;
-  instanceName?: string;
-  pubkey?: string;
-  multiaddrs?: string[];
-  announcedAt: number;
-}
-
-export interface InstancePeerRecord {
-  instanceId: string;
-  peerId: string;
-  instanceName?: string;
-  pubkey?: string;
-  multiaddrs: string[];
-  lastAnnouncedAt: number;
-  lastSeenAt: number;
-  source: "announce";
-}
-
-export interface InstancePeerTable {
-  version: 1;
-  updatedAt: number;
-  instances: Record<string, InstancePeerRecord>;
-}
-
-export interface InstancePeerStore {
-  load(): Promise<InstancePeerTable>;
-  save(table: InstancePeerTable): Promise<InstancePeerTable>;
-  list(): Promise<InstancePeerRecord[]>;
-  resolve(instanceId: string): Promise<InstancePeerRecord | undefined>;
-  upsertFromAnnounce(payload: InstanceAnnouncePayload): Promise<{
-    record: InstancePeerRecord;
-    changed: boolean;
-    peerIdSharedBy: string[];
-  }>;
-}
+import type {
+  InstanceAnnouncePayload,
+  InstancePeerRecord,
+  InstancePeerStore,
+  InstancePeerTable,
+} from "./types.js";
 
 export interface StoreLogger {
-  info(message: string): void;
-  debug(message: string): void;
-  warn(message: string): void;
+  info?(message: string): void;
+  debug?(message: string): void;
+  warn?(message: string): void;
 }
-
-const noopLogger: StoreLogger = {
-  info: () => {},
-  debug: () => {},
-  warn: () => {},
-};
 
 export function resolveInstancePeerPath(customPath?: string): string {
   if (customPath) return customPath;
@@ -86,72 +48,79 @@ function sameRecord(
     record.peerId === payload.peerId &&
     record.instanceName === payload.instanceName &&
     record.pubkey === payload.pubkey &&
-    sameStringArray(record.multiaddrs, payload.multiaddrs ?? []) &&
+    sameStringArray(record.multiaddrs, payload.multiaddrs) &&
     record.lastAnnouncedAt === payload.announcedAt
   );
 }
 
-export function createInstancePeerStore(options: {
+function normalizeTable(value: unknown): InstancePeerTable {
+  const candidate = value && typeof value === "object" ? value : {};
+  const table = candidate as Partial<InstancePeerTable>;
+  const instances =
+    table.instances && typeof table.instances === "object" && !Array.isArray(table.instances)
+      ? table.instances
+      : {};
+
+  return {
+    version: 1,
+    updatedAt: typeof table.updatedAt === "number" ? table.updatedAt : Date.now(),
+    instances: instances as Record<string, InstancePeerRecord>,
+  };
+}
+
+export function createInstancePeerStore(options?: {
   path?: string;
   logger?: StoreLogger;
-} = {}): InstancePeerStore {
-  const filePath = resolveInstancePeerPath(options.path);
-  const logger = options.logger ?? noopLogger;
-  let cache: InstancePeerTable | undefined;
+}): InstancePeerStore {
+  const filePath = resolveInstancePeerPath(options?.path);
+  const logger = options?.logger;
+  let cached: InstancePeerTable | undefined;
 
   async function load(): Promise<InstancePeerTable> {
-    if (cache) return cache;
-
     try {
       const raw = await readFile(filePath, "utf8");
-      cache = JSON.parse(raw) as InstancePeerTable;
-      return cache;
+      cached = normalizeTable(JSON.parse(raw));
+      return cached;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        cache = emptyTable();
-        return cache;
+        cached = emptyTable();
+        return cached;
       }
 
       const backupPath = `${filePath}.corrupt-${Date.now()}`;
       try {
         await mkdir(path.dirname(filePath), { recursive: true });
         await rename(filePath, backupPath);
-        logger.warn(`Instance peer store unreadable; moved to ${backupPath}`);
+        logger?.warn?.(`[libp2p-mesh] Instance peer store unreadable; moved to ${backupPath}`);
       } catch (renameError) {
-        logger.warn(
-          `Instance peer store unreadable; failed to move corrupt file to ${backupPath}: ${
+        logger?.warn?.(
+          `[libp2p-mesh] Instance peer store unreadable; failed to move corrupt file to ${backupPath}: ${
             (renameError as Error).message
           }`,
         );
       }
 
-      cache = emptyTable();
-      return cache;
+      cached = emptyTable();
+      return cached;
     }
   }
 
   async function save(table: InstancePeerTable): Promise<InstancePeerTable> {
-    const next: InstancePeerTable = {
-      ...table,
-      version: 1,
-      updatedAt: Date.now(),
-      instances: { ...table.instances },
-    };
+    table.updatedAt = Date.now();
     const dir = path.dirname(filePath);
     const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
 
     await mkdir(dir, { recursive: true });
-    await writeFile(tmpPath, JSON.stringify(next, null, 2), "utf8");
+    await writeFile(tmpPath, `${JSON.stringify(table, null, 2)}\n`, "utf8");
     await rename(tmpPath, filePath);
-    cache = next;
-    logger.debug(`Saved instance peer store to ${filePath}`);
-    return next;
+    cached = table;
+    logger?.debug?.(`[libp2p-mesh] Saved instance peer store to ${filePath}`);
+    return table;
   }
 
   return {
     load,
-    save,
     async list(): Promise<InstancePeerRecord[]> {
       const table = await load();
       return Object.values(table.instances).sort(
@@ -175,7 +144,7 @@ export function createInstancePeerStore(options: {
         peerId: payload.peerId,
         instanceName: payload.instanceName,
         pubkey: payload.pubkey,
-        multiaddrs: payload.multiaddrs ?? [],
+        multiaddrs: payload.multiaddrs,
         lastAnnouncedAt: payload.announcedAt,
         lastSeenAt: Date.now(),
         source: "announce",
@@ -193,8 +162,8 @@ export function createInstancePeerStore(options: {
         .map((entry) => entry.instanceId);
 
       if (peerIdSharedBy.length > 1) {
-        logger.warn(
-          `Peer ID ${payload.peerId} is shared by instances: ${peerIdSharedBy.join(", ")}`,
+        logger?.warn?.(
+          `[libp2p-mesh] Peer ID ${payload.peerId} is shared by instances: ${peerIdSharedBy.join(", ")}`,
         );
       }
 

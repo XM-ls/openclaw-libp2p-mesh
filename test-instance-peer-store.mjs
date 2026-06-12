@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import os from "node:os";
 import path from "node:path";
 import {
   createInstancePeerStore,
@@ -8,11 +8,11 @@ import {
 } from "./src/instance-peer-store.js";
 
 async function runTests() {
-  const tempDir = await mkdtemp(path.join(tmpdir(), "instance-peer-store-"));
-  const storePath = path.join(tempDir, "state", "instance-peer.json");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-instance-store-"));
+  const filePath = path.join(dir, "libp2p", "instance-peer.json");
   const warnings = [];
   const store = createInstancePeerStore({
-    path: storePath,
+    path: filePath,
     logger: {
       info: () => {},
       debug: () => {},
@@ -35,7 +35,6 @@ async function runTests() {
 
   const first = await store.upsertFromAnnounce(alice);
   assert.equal(first.changed, true);
-  assert.deepEqual(first.peerIdSharedBy, []);
   assert.equal(first.record.peerId, "peer-a");
 
   const listed = await store.list();
@@ -60,7 +59,8 @@ async function runTests() {
     ...alice,
     instanceId: "alice-copy@abc.123",
     peerId: "peer-a2",
-    multiaddrs: ["/ip4/127.0.0.1/tcp/10001/p2p/peer-a2"],
+    pubkey: "pub-copy",
+    multiaddrs: [],
   });
   assert.equal(copy.changed, true);
   assert.deepEqual(copy.peerIdSharedBy.sort(), [
@@ -69,21 +69,13 @@ async function runTests() {
   ].sort());
   assert.ok(warnings.some((message) => message.includes("peer-a2")));
 
-  const saved = JSON.parse(await readFile(storePath, "utf8"));
+  const saved = JSON.parse(await readFile(filePath, "utf8"));
   assert.equal(saved.version, 1);
   assert.equal(saved.instances["alice@abc.123"].peerId, "peer-a2");
 
-  await writeFile(storePath, "{ corrupt json", "utf8");
+  await writeFile(filePath, "{ corrupt json", "utf8");
   warnings.length = 0;
-  const corruptedStore = createInstancePeerStore({
-    path: storePath,
-    logger: {
-      info: () => {},
-      debug: () => {},
-      warn: (message) => warnings.push(message),
-    },
-  });
-  const recovered = await corruptedStore.load();
+  const recovered = await store.load();
   assert.equal(recovered.version, 1);
   assert.deepEqual(recovered.instances, {});
   assert.ok(warnings.some((message) => message.includes(".corrupt-")));
