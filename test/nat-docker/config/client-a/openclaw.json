@@ -17,7 +17,10 @@
           "bootstrapList": ["/dns4/relay/tcp/4001/p2p/__RELAY_PEER_ID__"],
           "relayList":     ["/dns4/relay/tcp/4001/p2p/__RELAY_PEER_ID__"],
           "enableUPnP": false,
-          "instanceName": "nat-test-client-a"
+          "instanceName": "nat-test-client-a",
+          "inboundChannel": "feishu",
+          "inboundTarget": "user:client-a",
+          "deliveryAckTimeoutMs": 15000
         }
       }
     }

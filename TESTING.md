@@ -11,6 +11,7 @@
 - [测试 3: OpenClaw 集成测试](#测试-3-openclaw-集成测试)
 - [测试 4: 端到端测试](#测试-4-端到端测试)
 - [测试 5: Agent Tools 功能测试](#测试-5-agent-tools-功能测试)
+- [测试 6: Instance ID 路由](#测试-6-instance-id-路由)
 - [故障排查](#故障排查)
 
 ---
@@ -130,6 +131,9 @@ openclaw tools list | grep p2p
 p2p_send_message    — Send a direct message to another agent via the P2P mesh network
 p2p_broadcast       — Broadcast a message to all peers on a topic via the P2P mesh network
 p2p_list_peers      — List currently connected peers in the P2P mesh network
+p2p_list_instances         — List OpenClaw instances discovered through the P2P mesh instance routing table
+p2p_resolve_instance       — Resolve an OpenClaw instance ID to the current libp2p Peer ID route
+p2p_send_instance_message  — Send a user message by instance ID and wait for remote channel delivery ACK
 ```
 
 ### Step 4 — 验证 Channel 注册
@@ -306,6 +310,37 @@ openclaw gateway run --config $OPENCLAW_STATE_DIR/openclaw.json
 ```
 
 **预期行为：** Agent 调用 `p2p_broadcast`，参数为 `{ topic: "openclaw-mesh", message: "hello mesh network" }`，返回 `Broadcast sent to topic openclaw-mesh`。
+
+---
+
+## 测试 6: Instance ID 路由
+
+启动两个 gateway 后，检查映射表：
+
+```bash
+cat ~/.openclaw/libp2p/instance-peer.json
+```
+
+预期包含远端实例：
+
+```json
+{
+  "version": 1,
+  "instances": {
+    "remote-instance-id": {
+      "peerId": "12D3KooW..."
+    }
+  }
+}
+```
+
+通过 Agent 工具发送：
+
+```text
+p2p_send_instance_message({ "instanceId": "remote-instance-id", "message": "今晚出来吃饭" })
+```
+
+预期发送方工具返回 `delivered: true`，接收方配置的 `inboundChannel/inboundTarget` 收到消息。
 
 ---
 

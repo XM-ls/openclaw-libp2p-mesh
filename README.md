@@ -156,6 +156,9 @@ If peers are on different networks, use a bootstrap node:
 | `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
 | `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
+| `inboundChannel` | `string` | `undefined` | OpenClaw channel used to display inbound P2P user messages, for example `"feishu"` |
+| `inboundTarget` | `string` | `undefined` | OpenClaw channel target for inbound P2P messages, for example `user:ou_xxx` or `chat:oc_xxx` |
+| `deliveryAckTimeoutMs` | `number` | `15000` | Timeout for waiting on remote channel delivery ACKs |
 
 ## NAT Traversal
 
@@ -268,6 +271,53 @@ Check the gateway logs on the receiving machine. You should see:
 [libp2p-mesh] Direct message from <sender-peer-id>: Hello from A!
 ```
 
+## Sending by OpenClaw Instance ID
+
+When two gateways connect, `libp2p-mesh` exchanges instance route announcements and automatically writes:
+
+```text
+~/.openclaw/libp2p/instance-peer.json
+```
+
+When `OPENCLAW_STATE_DIR` is set, the file is written to:
+
+```text
+$OPENCLAW_STATE_DIR/libp2p/instance-peer.json
+```
+
+Users do not configure this file path. It is plugin-managed state.
+
+For Feishu inbound display, configure the receiving instance:
+
+```json
+{
+  "plugins": {
+    "libp2p-mesh": {
+      "enabled": true,
+      "config": {
+        "discovery": "mdns",
+        "inboundChannel": "feishu",
+        "inboundTarget": "user:ou_xxx",
+        "deliveryAckTimeoutMs": 15000
+      }
+    }
+  },
+  "channels": {
+    "libp2p-mesh": { "enabled": true }
+  }
+}
+```
+
+The OpenClaw agent should prefer:
+
+```text
+p2p_send_instance_message({ "instanceId": "<target-instance-id>", "message": "今晚出来吃饭" })
+```
+
+The sender reports success only after the remote OpenClaw instance forwards the message to its configured inbound channel and returns a delivery ACK.
+
+Tools are not configured in `openclaw.json`; they are registered automatically by the plugin through `api.registerTool()`.
+
 ## Troubleshooting
 
 ### Peers do not discover each other
@@ -305,6 +355,17 @@ The peer may be unreachable. Check:
 - Is the target gateway still running?
 - Are both machines on the same network?
 - Is there a firewall blocking the connection?
+
+### Connected peers are not visible in logs
+
+Peer connection and disconnection are logged at `info` level:
+
+```text
+[libp2p-mesh] Peer connected: 12D3KooW...
+[libp2p-mesh] Instance mapping updated: bob@def.456 -> 12D3KooW...
+```
+
+If these lines are missing, confirm the gateway is running with normal info logs enabled and that both instances are on the same mDNS, bootstrap, or relay network.
 
 ## Architecture
 
