@@ -311,6 +311,14 @@ export function createMeshNetwork(options: {
                 parsed.timestamp = Date.now();
               }
 
+              const remotePeerId = connection.remotePeer.toString();
+              if (parsed.type !== "broadcast" && parsed.from !== remotePeerId) {
+                logger?.warn?.(
+                  `[libp2p-mesh] Rejecting message with mismatched peer envelope: from=${parsed.from}, remote=${remotePeerId}`,
+                );
+                continue;
+              }
+
               // Verify instance identity signature if present
               if (parsed.instanceId && parsed.signature) {
                 const dht = getDHTService();
@@ -348,6 +356,7 @@ export function createMeshNetwork(options: {
                       logger?.info?.(`[libp2p-mesh] Verified signature from instance ${parsed.instanceId}`);
                     } else {
                       logger?.warn?.(`[libp2p-mesh] Invalid signature from instance ${parsed.instanceId}`);
+                      continue;
                     }
                   } else {
                     logger?.warn?.(`[libp2p-mesh] No pubkey in DHT for instance ${parsed.instanceId}; skipping verification`);

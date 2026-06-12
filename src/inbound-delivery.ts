@@ -13,9 +13,11 @@ export type DeliveryLogger = {
 
 export function createOpenClawCliInboundDelivery(options?: {
   command?: string;
+  timeoutMs?: number;
   logger?: DeliveryLogger;
 }): InboundDeliveryAdapter {
   const command = options?.command ?? "openclaw";
+  const timeoutMs = options?.timeoutMs ?? 15000;
   const logger = options?.logger;
 
   return {
@@ -40,14 +42,31 @@ export function createOpenClawCliInboundDelivery(options?: {
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
 
         const finish = (result: InboundDeliveryResult): void => {
           if (settled) {
             return;
           }
           settled = true;
+          if (timeout) {
+            clearTimeout(timeout);
+          }
           resolve(result);
         };
+
+        timeout = setTimeout(() => {
+          logger?.warn?.(
+            `[libp2p-mesh] Inbound delivery command timed out after ${timeoutMs}ms`,
+          );
+          child.kill("SIGTERM");
+          finish({
+            ok: false,
+            channel: request.channel,
+            target: request.target,
+            error: `openclaw message send timed out after ${timeoutMs}ms`,
+          });
+        }, timeoutMs);
 
         child.stdout.on("data", (chunk: Buffer) => {
           stdout.push(chunk);

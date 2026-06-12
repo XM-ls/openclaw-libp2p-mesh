@@ -11,6 +11,7 @@ import type { MeshConfig } from "./types.js";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
   const config = api.pluginConfig as MeshConfig | undefined;
+  let unsubscribeInbound: (() => void) | undefined;
   const mesh = createMeshNetwork({
     config,
     logger: api.logger,
@@ -31,7 +32,7 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
     start: async () => {
       await mesh.start();
       await router.start();
-      mesh.onMessage((msg) => {
+      unsubscribeInbound = mesh.onMessage((msg) => {
         if (msg.type === "direct" || msg.type === "broadcast" || msg.type === "agent-sync") {
           handleP2PInbound(msg, { logger: api.logger });
         }
@@ -57,6 +58,8 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
       }
     },
     stop: async () => {
+      unsubscribeInbound?.();
+      unsubscribeInbound = undefined;
       await router.stop();
       await mesh.stop();
       api.logger.info?.("[libp2p-mesh] Service stopped.");

@@ -75,6 +75,7 @@ export function createInstancePeerStore(options?: {
   const filePath = resolveInstancePeerPath(options?.path);
   const logger = options?.logger;
   let cached: InstancePeerTable | undefined;
+  let mutationQueue = Promise.resolve();
 
   async function load(): Promise<InstancePeerTable> {
     try {
@@ -119,6 +120,15 @@ export function createInstancePeerStore(options?: {
     return table;
   }
 
+  async function runMutation<T>(fn: () => Promise<T>): Promise<T> {
+    const next = mutationQueue.then(fn, fn);
+    mutationQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
   return {
     load,
     async list(): Promise<InstancePeerRecord[]> {
@@ -136,39 +146,41 @@ export function createInstancePeerStore(options?: {
       changed: boolean;
       peerIdSharedBy: string[];
     }> {
-      const table = await load();
-      const existing = table.instances[payload.instanceId];
-      const changed = !sameRecord(existing, payload);
-      const record: InstancePeerRecord = {
-        instanceId: payload.instanceId,
-        peerId: payload.peerId,
-        instanceName: payload.instanceName,
-        pubkey: payload.pubkey,
-        multiaddrs: payload.multiaddrs,
-        lastAnnouncedAt: payload.announcedAt,
-        lastSeenAt: Date.now(),
-        source: "announce",
-      };
+      return runMutation(async () => {
+        const table = await load();
+        const existing = table.instances[payload.instanceId];
+        const changed = !sameRecord(existing, payload);
+        const record: InstancePeerRecord = {
+          instanceId: payload.instanceId,
+          peerId: payload.peerId,
+          instanceName: payload.instanceName,
+          pubkey: payload.pubkey,
+          multiaddrs: payload.multiaddrs,
+          lastAnnouncedAt: payload.announcedAt,
+          lastSeenAt: Date.now(),
+          source: "announce",
+        };
 
-      const nextTable: InstancePeerTable = {
-        ...table,
-        instances: {
-          ...table.instances,
-          [payload.instanceId]: record,
-        },
-      };
-      const peerIdSharedBy = Object.values(nextTable.instances)
-        .filter((entry) => entry.peerId === payload.peerId)
-        .map((entry) => entry.instanceId);
+        const nextTable: InstancePeerTable = {
+          ...table,
+          instances: {
+            ...table.instances,
+            [payload.instanceId]: record,
+          },
+        };
+        const peerIdSharedBy = Object.values(nextTable.instances)
+          .filter((entry) => entry.peerId === payload.peerId)
+          .map((entry) => entry.instanceId);
 
-      if (peerIdSharedBy.length > 1) {
-        logger?.warn?.(
-          `[libp2p-mesh] Peer ID ${payload.peerId} is shared by instances: ${peerIdSharedBy.join(", ")}`,
-        );
-      }
+        if (peerIdSharedBy.length > 1) {
+          logger?.warn?.(
+            `[libp2p-mesh] Peer ID ${payload.peerId} is shared by instances: ${peerIdSharedBy.join(", ")}`,
+          );
+        }
 
-      await save(nextTable);
-      return { record, changed, peerIdSharedBy };
+        await save(nextTable);
+        return { record, changed, peerIdSharedBy };
+      });
     },
   };
 }

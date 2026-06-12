@@ -86,6 +86,32 @@ async function runTests() {
     ),
   );
 
+  const concurrentDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-instance-store-"));
+  const concurrentStore = createInstancePeerStore({
+    path: path.join(concurrentDir, "libp2p", "instance-peer.json"),
+    logger: { warn: () => {}, info: () => {}, debug: () => {} },
+  });
+  await Promise.all([
+    concurrentStore.upsertFromAnnounce({
+      instanceId: "parallel-a@abc.123",
+      peerId: "peer-parallel-a",
+      instanceName: "parallel-a",
+      multiaddrs: [],
+      pubkey: "pub-pa",
+      announcedAt: 1,
+    }),
+    concurrentStore.upsertFromAnnounce({
+      instanceId: "parallel-b@abc.123",
+      peerId: "peer-parallel-b",
+      instanceName: "parallel-b",
+      multiaddrs: [],
+      pubkey: "pub-pb",
+      announcedAt: 1,
+    }),
+  ]);
+  const concurrentList = await concurrentStore.list();
+  assert.equal(concurrentList.length, 2);
+
   console.log("test-instance-peer-store: all assertions passed");
 }
 

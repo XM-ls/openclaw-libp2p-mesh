@@ -133,6 +133,7 @@ async function run() {
     id: "announce-b",
     type: "instance-announce",
     from: "peer-b",
+    instanceId: "bob@def.456",
     payload: JSON.stringify({
       instanceId: "bob@def.456",
       peerId: "peer-b",
@@ -147,6 +148,23 @@ async function run() {
   const resolved = await router.resolveInstance("bob@def.456");
   assert.equal(resolved?.peerId, "peer-b");
   assert.equal(logs.some((m) => m.includes("Instance mapping updated")), true);
+
+  await router.handleMessage({
+    id: "announce-spoof",
+    type: "instance-announce",
+    from: "peer-b",
+    instanceId: "mallory@bad.999",
+    payload: JSON.stringify({
+      instanceId: "mallory@bad.999",
+      peerId: "peer-c",
+      instanceName: "mallory",
+      multiaddrs: ["/ip4/127.0.0.1/tcp/9/p2p/peer-c"],
+      pubkey: "pub-m",
+      announcedAt: 200,
+    }),
+    timestamp: Date.now(),
+  });
+  assert.equal(await router.resolveInstance("mallory@bad.999"), undefined);
 
   const sendPromise = router.sendInstanceMessage("bob@def.456", "今晚出来吃饭");
   const outbound = await waitForMessage(mesh, (m) => m.message.type === "user-message");
@@ -178,6 +196,7 @@ async function run() {
     id: "user-message-b",
     type: "user-message",
     from: "peer-b",
+    instanceId: "bob@def.456",
     payload: JSON.stringify({
       messageId: "remote-message-1",
       fromInstanceId: "bob@def.456",
@@ -195,6 +214,26 @@ async function run() {
   assert.equal(deliveries[0].text, "收到");
   assert.equal(deliveries[0].metadata.replyToInstanceId, "bob@def.456");
   assert.equal(mesh.messages.some((m) => m.message.type === "delivery-ack"), true);
+
+  await router.handleMessage({
+    id: "user-message-spoof",
+    type: "user-message",
+    from: "peer-b",
+    instanceId: "mallory@bad.999",
+    payload: JSON.stringify({
+      messageId: "remote-message-2",
+      fromInstanceId: "bob@def.456",
+      toInstanceId: "alice@abc.123",
+      text: "spoof",
+      metadata: {
+        allowAgentAutoReply: true,
+        replyToInstanceId: "bob@def.456",
+        replyTool: "p2p_send_instance_message",
+      },
+    }),
+    timestamp: Date.now(),
+  });
+  assert.equal(deliveries.length, 1);
 
   const timeoutResult = await router.sendInstanceMessage("bob@def.456", "timeout");
   assert.equal(timeoutResult.sent, true);

@@ -27,6 +27,8 @@ type DeliveryCacheEntry = {
   payload: DeliveryAckPayload;
 };
 
+const MAX_DELIVERY_CACHE_ENTRIES = 1000;
+
 function parsePayload<T>(msg: P2PMessage): T | undefined {
   try {
     return JSON.parse(msg.payload) as T;
@@ -123,6 +125,12 @@ export function createInstanceRouter(options: {
       logger?.warn?.(`[libp2p-mesh] Ignoring malformed instance announce from ${msg.from}`);
       return;
     }
+    if (msg.instanceId !== payload.instanceId || payload.peerId !== msg.from) {
+      logger?.warn?.(
+        `[libp2p-mesh] Ignoring instance announce with mismatched envelope from ${msg.from}`,
+      );
+      return;
+    }
 
     if (payload.instanceId === mesh.getInstanceIdentity()?.id) {
       return;
@@ -165,6 +173,12 @@ export function createInstanceRouter(options: {
       !isNonEmptyString(payload.text)
     ) {
       logger?.warn?.(`[libp2p-mesh] Ignoring malformed user-message from ${msg.from}`);
+      return;
+    }
+    if (msg.instanceId !== payload.fromInstanceId) {
+      logger?.warn?.(
+        `[libp2p-mesh] Ignoring user-message with mismatched instance envelope from ${msg.from}`,
+      );
       return;
     }
 
@@ -218,7 +232,16 @@ export function createInstanceRouter(options: {
     }
 
     deliveryCache.set(payload.messageId, { peerId: msg.from, payload: ack });
+    trimDeliveryCache();
     await sendAck(msg.from, ack);
+  }
+
+  function trimDeliveryCache(): void {
+    while (deliveryCache.size > MAX_DELIVERY_CACHE_ENTRIES) {
+      const oldestKey = deliveryCache.keys().next().value as string | undefined;
+      if (!oldestKey) return;
+      deliveryCache.delete(oldestKey);
+    }
   }
 
   function handleAck(msg: P2PMessage): void {
@@ -293,6 +316,7 @@ export function createInstanceRouter(options: {
       });
     }
     pendingAcks.clear();
+    deliveryCache.clear();
   }
 
   async function listInstances() {

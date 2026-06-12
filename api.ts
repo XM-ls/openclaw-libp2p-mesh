@@ -15,5 +15,6 @@ export type {
   MeshConfig,
   MeshNetwork,
   P2PMessage,
+  P2PMessageType,
   UserMessagePayload,
 } from "./src/types.js";

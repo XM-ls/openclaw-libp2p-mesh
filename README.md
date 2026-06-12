@@ -140,7 +140,7 @@ If peers are on different networks, use a bootstrap node:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `discovery` | `string` | `"mdns"` | Discovery mechanism: `"mdns"` (LAN), `"bootstrap"` (static list), `"dht"` (not yet implemented) |
+| `discovery` | `string` | `"mdns"` | Discovery mechanism: `"mdns"` (LAN), `"bootstrap"` (static list), `"dht"` (Kademlia peer discovery and pubkey registry) |
 | `listenAddrs` | `string[]` | `["/ip4/0.0.0.0/tcp/0"]` | libp2p listen multiaddrs |
 | `bootstrapList` | `string[]` | `[]` | Static bootstrap peer multiaddrs (when `discovery=bootstrap`) |
 | `enableWebSocket` | `boolean` | `false` | Enable WebSocket transport for browser/NAT compatibility |
