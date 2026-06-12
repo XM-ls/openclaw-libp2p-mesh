@@ -2,7 +2,6 @@ import type {
   DeliveryAckPayload,
   InboundDeliveryAdapter,
   InstanceAnnouncePayload,
-  InstancePeerRecord,
   InstancePeerStore,
   InstanceRouter,
   MeshConfig,
@@ -58,7 +57,6 @@ export function createInstanceRouter(options: {
   const announcedPeers = new Set<string>();
   const pendingAcks = new Map<string, PendingAck>();
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
-  const routeCache = new Map<string, InstancePeerRecord>();
   const unsubs: Array<() => void> = [];
 
   function localInstanceId(): string {
@@ -131,7 +129,6 @@ export function createInstanceRouter(options: {
     }
 
     const result = await store.upsertFromAnnounce(payload);
-    routeCache.set(payload.instanceId, result.record);
     if (result.changed) {
       logger?.info?.(
         `[libp2p-mesh] Instance mapping updated: ${payload.instanceId} -> ${payload.peerId}`,
@@ -206,9 +203,7 @@ export function createInstanceRouter(options: {
           fromPeerId: msg.from,
           p2pMessageId: payload.messageId,
           allowAgentAutoReply: metadata?.allowAgentAutoReply === true,
-          replyToInstanceId: isNonEmptyString(metadata?.replyToInstanceId)
-            ? metadata.replyToInstanceId
-            : payload.fromInstanceId,
+          replyToInstanceId: payload.fromInstanceId,
           replyTool: "p2p_send_instance_message",
         },
       });
@@ -309,7 +304,7 @@ export function createInstanceRouter(options: {
   }
 
   async function sendInstanceMessage(instanceId: string, message: string) {
-    const route = routeCache.get(instanceId) ?? (await store.resolve(instanceId));
+    const route = await store.resolve(instanceId);
     if (!route) {
       return {
         sent: false,
@@ -319,7 +314,6 @@ export function createInstanceRouter(options: {
         error: `Instance ${instanceId} has not been discovered. Ask the user to confirm the remote gateway is running and connected to the same P2P network.`,
       };
     }
-    routeCache.set(instanceId, route);
 
     const fromInstanceId = localInstanceId();
     const messageId = crypto.randomUUID();

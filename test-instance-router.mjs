@@ -66,6 +66,17 @@ function createFakeMesh(identity, peerId) {
   };
 }
 
+async function waitForMessage(mesh, predicate) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const message = mesh.messages.find(predicate);
+    if (message) {
+      return message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return undefined;
+}
+
 async function run() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-instance-router-"));
   const store = createInstancePeerStore({
@@ -138,7 +149,7 @@ async function run() {
   assert.equal(logs.some((m) => m.includes("Instance mapping updated")), true);
 
   const sendPromise = router.sendInstanceMessage("bob@def.456", "今晚出来吃饭");
-  const outbound = mesh.messages.find((m) => m.message.type === "user-message");
+  const outbound = await waitForMessage(mesh, (m) => m.message.type === "user-message");
   assert.equal(outbound.targetPeerId, "peer-b");
   const outboundPayload = JSON.parse(outbound.message.payload);
   assert.equal(outboundPayload.toInstanceId, "bob@def.456");
@@ -174,7 +185,7 @@ async function run() {
       text: "收到",
       metadata: {
         allowAgentAutoReply: true,
-        replyToInstanceId: "bob@def.456",
+        replyToInstanceId: "mallory@override.999",
         replyTool: "p2p_send_instance_message",
       },
     }),
@@ -182,6 +193,7 @@ async function run() {
   });
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0].text, "收到");
+  assert.equal(deliveries[0].metadata.replyToInstanceId, "bob@def.456");
   assert.equal(mesh.messages.some((m) => m.message.type === "delivery-ack"), true);
 
   const timeoutResult = await router.sendInstanceMessage("bob@def.456", "timeout");
