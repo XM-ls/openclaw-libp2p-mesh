@@ -545,7 +545,7 @@ git commit -m "feat: add structured mesh messages"
 - 新增：`test-instance-peer-store.mjs`
 - 通过命令测试：`node --import tsx test-instance-peer-store.mjs`
 
-- [ ] **步骤 1：编写 store 测试**
+- [x] **步骤 1：编写 store 测试**
 
 Create `test-instance-peer-store.mjs`:
 
@@ -641,7 +641,7 @@ run().catch((err) => {
 });
 ```
 
-- [ ] **步骤 2：运行 store 测试以确认失败**
+- [x] **步骤 2：运行 store 测试以确认失败**
 
 ```bash
 node --import tsx test-instance-peer-store.mjs
@@ -649,7 +649,7 @@ node --import tsx test-instance-peer-store.mjs
 
 预期：失败，因为 `src/instance-peer-store.ts` 还不存在。
 
-- [ ] **步骤 3：实现 `src/instance-peer-store.ts`**
+- [x] **步骤 3：实现 `src/instance-peer-store.ts`**
 
 创建该模块：
 
@@ -794,7 +794,7 @@ export function createInstancePeerStore(options?: {
 }
 ```
 
-- [ ] **步骤 4：运行 store 测试**
+- [x] **步骤 4：运行 store 测试**
 
 ```bash
 node --import tsx test-instance-peer-store.mjs
@@ -802,7 +802,7 @@ node --import tsx test-instance-peer-store.mjs
 
 预期：`test-instance-peer-store: all assertions passed`
 
-- [ ] **步骤 5：运行 build**
+- [x] **步骤 5：运行 build**
 
 ```bash
 pnpm build
@@ -810,7 +810,7 @@ pnpm build
 
 预期：没有 TypeScript 错误。
 
-- [ ] **步骤 6：提交 store**
+- [x] **步骤 6：提交 store**
 
 ```bash
 git add src/instance-peer-store.ts test-instance-peer-store.mjs
@@ -826,7 +826,7 @@ git commit -m "feat: add instance peer store"
 - 测试覆盖放在下一任务的 `test-instance-router.mjs` 中
 - 通过命令测试：`pnpm build`
 
-- [ ] **步骤 1：实现 `src/inbound-delivery.ts`**
+- [x] **步骤 1：实现 `src/inbound-delivery.ts`**
 
 创建：
 
@@ -908,7 +908,7 @@ export function createOpenClawCliInboundDelivery(options?: {
 }
 ```
 
-- [ ] **步骤 2：运行 build**
+- [x] **步骤 2：运行 build**
 
 ```bash
 pnpm build
@@ -916,7 +916,7 @@ pnpm build
 
 预期：没有 TypeScript 错误。
 
-- [ ] **步骤 3：提交入站投递 adapter**
+- [x] **步骤 3：提交入站投递 adapter**
 
 ```bash
 git add src/inbound-delivery.ts
