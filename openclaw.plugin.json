@@ -4,6 +4,17 @@
     "onStartup": true
   },
   "channels": ["libp2p-mesh"],
+  "channelConfigs": {
+    "libp2p-mesh": {
+      "label": "P2P Mesh",
+      "description": "libp2p mesh network channel.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    }
+  },
   "enabledByDefault": true,
   "name": "libp2p Mesh Network",
   "description": "P2P network for cross-instance agent communication via libp2p.",
@@ -90,6 +101,16 @@
         "type": "array",
         "items": { "type": "string" },
         "description": "Multiaddrs of relays to reserve a slot on (each entry must end in /p2p/<peer-id>)."
+      },
+      "relayChannel": {
+        "type": "string",
+        "deprecated": true,
+        "description": "Deprecated compatibility field from older libp2p-mesh versions. Use relayList for relay nodes."
+      },
+      "relayAccountId": {
+        "type": "string",
+        "deprecated": true,
+        "description": "Deprecated compatibility field from older libp2p-mesh versions. This value is ignored."
       },
       "discoverRelays": {
         "type": "number",

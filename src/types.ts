@@ -188,6 +188,13 @@ export interface MeshConfig {
    */
   relayList?: string[];
   /**
+   * Deprecated pre-2026.6 config keys kept so existing OpenClaw configs keep
+   * validating after upgrade. Relay selection is now configured with
+   * `relayList`; inbound display uses `inboundChannel`/`inboundTarget`.
+   */
+  relayChannel?: string;
+  relayAccountId?: string;
+  /**
    * Number of relays to auto-discover via content routing. Requires DHT.
    * Default `0` (disabled). Set to e.g. `2` to look up public relays.
    */

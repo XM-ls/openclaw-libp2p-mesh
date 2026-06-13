@@ -101,6 +101,16 @@ function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
           items: { type: "string" },
           description: "Multiaddrs of relay nodes to reserve a slot on (each entry must end in /p2p/<peer-id>).",
         },
+        relayChannel: {
+          type: "string",
+          deprecated: true,
+          description: "Deprecated compatibility field from older libp2p-mesh versions. Use relayList for relay nodes.",
+        },
+        relayAccountId: {
+          type: "string",
+          deprecated: true,
+          description: "Deprecated compatibility field from older libp2p-mesh versions. This value is ignored.",
+        },
         discoverRelays: {
           type: "number",
           default: 0,
