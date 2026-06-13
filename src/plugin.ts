@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createLibp2pMeshChannel } from "./channel.js";
 import { handleP2PInbound } from "./inbound.js";
-import { createOpenClawCliInboundDelivery } from "./inbound-delivery.js";
+import { createOpenClawRuntimeInboundDelivery } from "./inbound-delivery.js";
 import { createInstancePeerStore } from "./instance-peer-store.js";
 import { createInstanceRouter } from "./instance-router.js";
 import { createMeshNetwork } from "./mesh.js";
@@ -18,7 +18,11 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
     logger: api.logger,
   });
   const store = createInstancePeerStore({ logger: api.logger });
-  const delivery = createOpenClawCliInboundDelivery({ logger: api.logger });
+  const delivery = createOpenClawRuntimeInboundDelivery({
+    config: api.config,
+    loadAdapter: api.runtime.channel.outbound.loadAdapter,
+    logger: api.logger,
+  });
   const router = createInstanceRouter({
     mesh,
     store,
