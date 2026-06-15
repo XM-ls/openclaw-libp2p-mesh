@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import tempfile
+import zipfile
 from pathlib import Path
 
 from pptx import Presentation
@@ -9,6 +11,7 @@ from pptx.util import Inches, Pt
 
 
 OUT = Path("docs/presentations/p2p-mesh-mentor-2026-06-15.pptx")
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 COLORS = {
     "bg": RGBColor(248, 250, 252),
@@ -165,6 +168,37 @@ def build_presentation():
     return prs
 
 
+def normalize_pptx_zip(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as source:
+        entries = [(info, source.read(info.filename)) for info in source.infolist()]
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".pptx", delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        with zipfile.ZipFile(temp_path, "w") as target:
+            for source_info, data in entries:
+                target_info = zipfile.ZipInfo(source_info.filename, ZIP_TIMESTAMP)
+                target_info.compress_type = source_info.compress_type
+                target_info.comment = source_info.comment
+                target_info.extra = source_info.extra
+                target_info.external_attr = source_info.external_attr
+                target_info.internal_attr = source_info.internal_attr
+                target_info.create_system = source_info.create_system
+                target_info.create_version = source_info.create_version
+                target_info.extract_version = source_info.extract_version
+                target_info.flag_bits = source_info.flag_bits
+                target_info.volume = source_info.volume
+                target.writestr(target_info, data)
+
+        temp_path.replace(path)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
+
+
 def main():
     prs = build_presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -174,6 +208,7 @@ def main():
     add_footer(slide, 1, "概览")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(OUT)
+    normalize_pptx_zip(OUT)
     print(f"wrote {OUT}")
 
 
