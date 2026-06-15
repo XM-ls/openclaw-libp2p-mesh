@@ -10,7 +10,8 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 
-OUT = Path("docs/presentations/p2p-mesh-mentor-2026-06-15.pptx")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+OUT = REPO_ROOT / "docs/presentations/p2p-mesh-mentor-2026-06-15.pptx"
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 COLORS = {
