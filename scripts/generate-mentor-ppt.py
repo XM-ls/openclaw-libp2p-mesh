@@ -41,16 +41,25 @@ def add_bg(slide):
 
 
 def add_title(slide, title, subtitle=None, section=None):
-    box = slide.shapes.add_textbox(Inches(0.55), Inches(0.32), Inches(8.5), Inches(0.55))
+    box = slide.shapes.add_textbox(Inches(0.75), Inches(0.32), Inches(9.35), Inches(0.62))
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = Inches(0.06)
+    tf.margin_right = Inches(0.06)
+    tf.margin_top = Inches(0.02)
+    tf.margin_bottom = Inches(0.02)
     p = box.text_frame.paragraphs[0]
     p.text = title
     p.font.name = FONT
-    p.font.size = Pt(30)
+    p.font.size = Pt(27 if len(title) > 22 else 29)
     p.font.bold = True
     p.font.color.rgb = COLORS["text"]
 
     if subtitle:
-        sub = slide.shapes.add_textbox(Inches(0.58), Inches(0.9), Inches(8.8), Inches(0.32))
+        sub = slide.shapes.add_textbox(Inches(0.78), Inches(0.92), Inches(9.1), Inches(0.34))
+        sub.text_frame.word_wrap = True
+        sub.text_frame.margin_left = Inches(0.04)
+        sub.text_frame.margin_right = Inches(0.04)
         sp = sub.text_frame.paragraphs[0]
         sp.text = subtitle
         sp.font.name = FONT
@@ -83,6 +92,11 @@ def add_footer(slide, page, section):
 def add_text_box(slide, x, y, w, h, lines, font_size=17):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = Inches(0.08)
+    tf.margin_right = Inches(0.08)
+    tf.margin_top = Inches(0.03)
+    tf.margin_bottom = Inches(0.03)
     tf.clear()
     for i, line in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -107,18 +121,30 @@ def card(slide, x, y, w, h, title, body=None, accent="primary"):
     bar.fill.fore_color.rgb = COLORS[accent]
     bar.line.color.rgb = COLORS[accent]
 
-    t = slide.shapes.add_textbox(Inches(x + 0.22), Inches(y + 0.18), Inches(w - 0.42), Inches(0.3))
+    title_size = 12 if w < 1.8 or len(title) > 10 else 16
+    title_h = 0.44 if title_size <= 12 else 0.34
+    t = slide.shapes.add_textbox(Inches(x + 0.22), Inches(y + 0.16), Inches(w - 0.42), Inches(title_h))
+    t.text_frame.word_wrap = True
+    t.text_frame.margin_left = Inches(0.03)
+    t.text_frame.margin_right = Inches(0.03)
+    t.text_frame.margin_top = Inches(0.02)
+    t.text_frame.margin_bottom = Inches(0.02)
     p = t.text_frame.paragraphs[0]
     p.text = title
     p.font.name = FONT
-    p.font.size = Pt(16)
+    p.font.size = Pt(title_size)
     p.font.bold = True
     p.font.color.rgb = COLORS["text"]
 
     if body:
-        b = slide.shapes.add_textbox(Inches(x + 0.22), Inches(y + 0.58), Inches(w - 0.42), Inches(h - 0.75))
+        body_y = y + 0.62 if title_size <= 12 else y + 0.58
+        b = slide.shapes.add_textbox(Inches(x + 0.22), Inches(body_y), Inches(w - 0.42), Inches(h - (body_y - y) - 0.15))
         tf = b.text_frame
         tf.word_wrap = True
+        tf.margin_left = Inches(0.03)
+        tf.margin_right = Inches(0.03)
+        tf.margin_top = Inches(0.02)
+        tf.margin_bottom = Inches(0.02)
         tf.clear()
         for i, line in enumerate(body):
             bp = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -157,7 +183,7 @@ def bullet_slide(prs, page, title, section, bullets, subtitle=None):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_bg(slide)
     add_title(slide, title, subtitle=subtitle, section=section)
-    add_text_box(slide, 0.85, 1.45, 7.4, 4.8, bullets, font_size=19)
+    add_text_box(slide, 0.95, 1.45, 6.8, 4.8, bullets, font_size=19)
     add_footer(slide, page, section)
     return slide
 
@@ -253,7 +279,8 @@ def main():
     # 4. Tool triggering
     slide = bullet_slide(prs, 4, "用户指令如何触发 P2P", "工具", [
         "用户给出目标 instanceId 和原始消息内容。",
-        "Agent 主路径调用 p2p_send_instance_message({ instanceId, message })。",
+        "Agent 主路径调用实例发送工具。",
+        "工具参数：p2p_send_instance_message({ instanceId, message })。",
         "不再手动先查映射再调用 p2p_send_message。",
         "p2p_send_message 保留为已知 peerId 的低层调试直发。"
     ])
