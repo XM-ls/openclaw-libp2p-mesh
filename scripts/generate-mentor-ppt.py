@@ -331,8 +331,8 @@ def main():
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_bg(slide)
     add_title(slide, "安全边界与鲁棒性", section="边界")
-    card(slide, 0.85, 1.35, 5.45, 3.9, "允许", ["P2P 文本作为普通消息转发", "重复消息复用上次 ACK", "失败原因回传给发送方"], "success")
-    card(slide, 7.05, 1.35, 5.45, 3.9, "禁止", ["不把远端文本当系统提示词", "不自动执行远端指令", "不再使用 child_process shell 投递"], "danger")
+    card(slide, 0.85, 1.35, 5.45, 3.9, "允许", ["P2P 文本作为普通消息转发", "重复 user-message 去重并复用上次 ACK", "失败原因回传给发送方"], "success")
+    card(slide, 7.05, 1.35, 5.45, 3.9, "禁止", ["不把远端文本当系统提示词", "防循环：ACK 不再作为普通消息转发", "不再使用 child_process shell 投递"], "danger")
     add_footer(slide, 11, "边界")
 
     # 12. Summary
