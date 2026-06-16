@@ -1,4 +1,4 @@
-# openclaw-libp2p-mesh
+# libp2p-mesh
 
 P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication between OpenClaw instances using libp2p — no central server required.
 
@@ -22,7 +22,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 ### Method 1: Via OpenClaw CLI (Recommended)
 
 ```bash
-openclaw install openclaw-libp2p-mesh
+openclaw install libp2p-mesh
 ```
 
 ### Method 2: Manual (npm)
@@ -31,7 +31,7 @@ openclaw install openclaw-libp2p-mesh
 
 ```bash
 cd ~/.openclaw/npm
-npm install openclaw-libp2p-mesh
+npm install libp2p-mesh
 ```
 
 然后刷新插件注册表：
