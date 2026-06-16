@@ -63,7 +63,7 @@
       "systemImage": "network"
     },
     "install": {
-      "npmSpec": "openclaw-libp2p-mesh",
+      "npmSpec": "libp2p-mesh",
       "defaultChoice": "npm",
       "minHostVersion": ">=2026.3.24"
     },
@@ -96,12 +96,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lilingfy/openclaw-libp2p-mesh.git"
+    "url": "git+https://github.com/XM-ls/openclaw-libp2p-mesh.git"
   },
   "bugs": {
-    "url": "https://github.com/lilingfy/openclaw-libp2p-mesh/issues"
+    "url": "https://github.com/XM-ls/openclaw-libp2p-mesh/issues"
   },
-  "homepage": "https://github.com/lilingfy/openclaw-libp2p-mesh#readme",
+  "homepage": "https://github.com/XM-ls/openclaw-libp2p-mesh#readme",
   "pnpm": {
     "onlyBuiltDependencies": [
       "@google/genai",
