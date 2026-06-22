@@ -351,9 +351,11 @@ test("plugin entry schema exposes inboundTargets runtime config", () => {
 
 test("mixed target results return ok true with every target result", async () => {
   const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
   const delivery: InboundDeliveryAdapter = {
     async deliver(request) {
-      if (request.channel === "telegram") {
+      deliveries.push(request);
+      if (request.channel === "feishu") {
         return {
           ok: false,
           channel: request.channel,
@@ -378,10 +380,15 @@ test("mixed target results return ok true with every target result", async () =>
 
   await router.handleMessage(makeUserMessage());
 
+  assert.deepEqual(
+    deliveries.map((request) => `${request.channel}/${request.target}`),
+    ["feishu/user:ou_xxx", "telegram/chat:123456"],
+  );
+
   const ack = parseAck(sent);
   assert.equal(ack.ok, true);
-  assert.equal(ack.inboundChannel, "feishu");
-  assert.equal(ack.inboundTarget, "user:ou_xxx");
+  assert.equal(ack.inboundChannel, "telegram");
+  assert.equal(ack.inboundTarget, "chat:123456");
   assert.deepEqual(
     ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
       id: result.id,
@@ -389,8 +396,8 @@ test("mixed target results return ok true with every target result", async () =>
       error: result.error,
     })),
     [
-      { id: "feishu-main", ok: true, error: undefined },
-      { id: "telegram-main", ok: false, error: "机器人对该用户没有可用权限" },
+      { id: "feishu-main", ok: false, error: "机器人对该用户没有可用权限" },
+      { id: "telegram-main", ok: true, error: undefined },
     ],
   );
 });
@@ -466,6 +473,8 @@ test("thrown target delivery error is reported while later targets still deliver
   const ack = parseAck(sent);
   assert.equal(ack.ok, true);
   assert.equal(ack.error, undefined);
+  assert.equal(ack.inboundChannel, "telegram");
+  assert.equal(ack.inboundTarget, "chat:123456");
   assert.deepEqual(
     ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
       id: result.id,
