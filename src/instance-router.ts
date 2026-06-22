@@ -26,9 +26,18 @@ type PendingAck = {
 };
 
 type DeliveryCacheEntry = {
-  peerId: string;
   payload?: DeliveryAckPayload;
   promise?: Promise<DeliveryAckPayload>;
+};
+
+type InboundDeliveryState = {
+  timedOut: boolean;
+  currentTarget?: EffectiveInboundTarget;
+  results: DeliveryTargetResult[];
+};
+
+type InboundTimeoutController = {
+  stop: () => void;
 };
 
 const MAX_DELIVERY_CACHE_ENTRIES = 1000;
@@ -142,7 +151,9 @@ export function createInstanceRouter(options: {
   const announcedPeers = new Set<string>();
   const pendingAcks = new Map<string, PendingAck>();
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
+  const inboundTimeoutControllers = new Set<InboundTimeoutController>();
   const unsubs: Array<() => void> = [];
+  let stopped = false;
 
   function localInstanceId(): string {
     const identity = mesh.getInstanceIdentity();
@@ -246,9 +257,38 @@ export function createInstanceRouter(options: {
     });
   }
 
+  function deliveryCacheKey(payload: UserMessagePayload, msg: P2PMessage): string {
+    return [
+      payload.fromInstanceId,
+      msg.from,
+      payload.toInstanceId,
+      payload.messageId,
+    ].join("\0");
+  }
+
+  function buildAckFromDeliveryState(
+    messageId: string,
+    state: Pick<InboundDeliveryState, "results">,
+  ): DeliveryAckPayload {
+    const selected = firstAttemptedResult(state.results);
+    return {
+      ackFor: messageId,
+      ok: state.results.some((result) => result.ok),
+      inboundChannel: selected?.channel,
+      inboundTarget: selected?.target,
+      deliveredAt: Date.now(),
+      error: state.results.every((result) => !result.ok)
+        ? state.results.map((result) => result.error).filter(Boolean).join("; ") ||
+          "inbound delivery failed"
+        : undefined,
+      results: state.results,
+    };
+  }
+
   async function deliverAndBuildAck(
     payload: UserMessagePayload,
     msg: P2PMessage,
+    state: InboundDeliveryState,
   ): Promise<DeliveryAckPayload> {
     const targets = effectiveInboundTargets(config);
     if (targets.length === 0) {
@@ -262,10 +302,13 @@ export function createInstanceRouter(options: {
     }
 
     const metadata = payload.metadata;
-    const results: DeliveryTargetResult[] = [];
     for (const target of targets) {
+      if (state.timedOut) {
+        break;
+      }
+
       if (!target.valid) {
-        results.push({
+        state.results.push({
           id: target.id,
           channel: target.channel,
           target: target.target,
@@ -275,6 +318,7 @@ export function createInstanceRouter(options: {
         continue;
       }
 
+      state.currentTarget = target;
       try {
         const result = await delivery.deliver({
           channel: target.channel,
@@ -289,7 +333,10 @@ export function createInstanceRouter(options: {
             replyTool: "p2p_send_instance_message",
           },
         });
-        results.push({
+        if (state.timedOut) {
+          break;
+        }
+        state.results.push({
           id: target.id,
           channel: result.channel,
           target: result.target,
@@ -297,42 +344,44 @@ export function createInstanceRouter(options: {
           error: result.error,
         });
       } catch (error) {
-        results.push({
+        if (state.timedOut) {
+          break;
+        }
+        state.results.push({
           id: target.id,
           channel: target.channel,
           target: target.target,
           ok: false,
           error: summarizeError(error),
         });
+      } finally {
+        if (state.currentTarget === target) {
+          state.currentTarget = undefined;
+        }
       }
     }
 
-    const selected = firstAttemptedResult(results);
-    return {
-      ackFor: payload.messageId,
-      ok: results.some((result) => result.ok),
-      inboundChannel: selected?.channel,
-      inboundTarget: selected?.target,
-      deliveredAt: Date.now(),
-      error: results.every((result) => !result.ok)
-        ? results.map((result) => result.error).filter(Boolean).join("; ") ||
-          "inbound delivery failed"
-        : undefined,
-      results,
-    };
+    return buildAckFromDeliveryState(payload.messageId, state);
   }
 
-  function buildInboundTimeoutAck(messageId: string): DeliveryAckPayload {
+  function buildInboundTimeoutAck(
+    messageId: string,
+    state: InboundDeliveryState,
+  ): DeliveryAckPayload {
     const error = `inbound delivery timeout after ${ackTimeoutMs}ms`;
-    const results: DeliveryTargetResult[] = effectiveInboundTargets(config).map((target) => ({
-      id: target.id,
-      channel: target.channel,
-      target: target.target,
-      ok: false,
-      error: target.valid
-        ? error
-        : target.error ?? "inbound target channel and target are required",
-    }));
+    const results = state.results.slice();
+    const currentTarget = state.currentTarget;
+    if (currentTarget) {
+      results.push({
+        id: currentTarget.id,
+        channel: currentTarget.channel,
+        target: currentTarget.target,
+        ok: false,
+        error: currentTarget.valid
+          ? error
+          : currentTarget.error ?? "inbound target channel and target are required",
+      });
+    }
     const selected = firstAttemptedResult(results);
     return {
       ackFor: messageId,
@@ -348,27 +397,41 @@ export function createInstanceRouter(options: {
   function withInboundDeliveryTimeout(
     promise: Promise<DeliveryAckPayload>,
     messageId: string,
+    state: InboundDeliveryState,
   ): Promise<DeliveryAckPayload> {
     return new Promise((resolve) => {
       let settled = false;
-      const timer = setTimeout(() => {
+      const settle = (ack: DeliveryAckPayload): void => {
         if (settled) return;
         settled = true;
-        resolve(buildInboundTimeoutAck(messageId));
+        clearTimeout(timer);
+        inboundTimeoutControllers.delete(controller);
+        resolve(ack);
+      };
+      const timer = setTimeout(() => {
+        state.timedOut = true;
+        settle(buildInboundTimeoutAck(messageId, state));
       }, ackTimeoutMs);
+      const controller: InboundTimeoutController = {
+        stop() {
+          state.timedOut = true;
+          settle({
+            ackFor: messageId,
+            ok: false,
+            deliveredAt: Date.now(),
+            error: "instance router stopped",
+            results: state.results,
+          });
+        },
+      };
+      inboundTimeoutControllers.add(controller);
 
       promise
         .then((ack) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve(ack);
+          settle(ack);
         })
         .catch((error) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve({
+          settle({
             ackFor: messageId,
             ok: false,
             deliveredAt: Date.now(),
@@ -380,6 +443,9 @@ export function createInstanceRouter(options: {
   }
 
   async function handleUserMessage(msg: P2PMessage): Promise<void> {
+    if (stopped) {
+      return;
+    }
     const payload = parsePayload<UserMessagePayload>(msg);
     if (
       !payload ||
@@ -413,13 +479,17 @@ export function createInstanceRouter(options: {
       return;
     }
 
-    const cached = deliveryCache.get(payload.messageId);
+    const cacheKey = deliveryCacheKey(payload, msg);
+    const cached = deliveryCache.get(cacheKey);
     if (cached) {
       const ack = cached.payload ?? (await cached.promise);
+      if (stopped) {
+        return;
+      }
       if (!ack) {
         throw new Error(`delivery cache entry for ${payload.messageId} has no ACK payload`);
       }
-      await sendAck(cached.peerId, ack);
+      await sendAck(msg.from, ack);
       return;
     }
 
@@ -435,14 +505,22 @@ export function createInstanceRouter(options: {
       return;
     }
 
+    const deliveryState: InboundDeliveryState = {
+      timedOut: false,
+      results: [],
+    };
     const ackPromise = withInboundDeliveryTimeout(
-      Promise.resolve().then(() => deliverAndBuildAck(payload, msg)),
+      Promise.resolve().then(() => deliverAndBuildAck(payload, msg, deliveryState)),
       payload.messageId,
+      deliveryState,
     );
-    deliveryCache.set(payload.messageId, { peerId: msg.from, promise: ackPromise });
+    deliveryCache.set(cacheKey, { promise: ackPromise });
     trimDeliveryCache();
     const ack = await ackPromise;
-    deliveryCache.set(payload.messageId, { peerId: msg.from, payload: ack });
+    if (stopped) {
+      return;
+    }
+    deliveryCache.set(cacheKey, { payload: ack });
     trimDeliveryCache();
     await sendAck(msg.from, ack);
   }
@@ -510,6 +588,7 @@ export function createInstanceRouter(options: {
   }
 
   async function start(): Promise<void> {
+    stopped = false;
     unsubs.push(
       mesh.onMessage((msg) => {
         handleMessage(msg).catch((error) => {
@@ -533,9 +612,15 @@ export function createInstanceRouter(options: {
   }
 
   async function stop(): Promise<void> {
+    stopped = true;
     for (const unsub of unsubs.splice(0)) {
       unsub();
     }
+
+    for (const controller of Array.from(inboundTimeoutControllers)) {
+      controller.stop();
+    }
+    inboundTimeoutControllers.clear();
 
     for (const [messageId, pending] of pendingAcks) {
       clearTimeout(pending.timer);
@@ -627,6 +712,8 @@ export function createInstanceRouter(options: {
       toPeerId: route.peerId,
       ackMessageId: ack.ackFor,
       inboundChannel: ack.inboundChannel,
+      inboundTarget: ack.inboundTarget,
+      deliveryResults: ack.results,
       error: ack.error,
     };
   }

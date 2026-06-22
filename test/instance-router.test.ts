@@ -140,6 +140,28 @@ function makeUserMessage(messageId = "message-1"): P2PMessage {
   };
 }
 
+function makeUserMessageFrom(
+  messageId: string,
+  fromInstanceId: string,
+  fromPeerId: string,
+): P2PMessage {
+  const message = makeUserMessage(messageId);
+  return {
+    ...message,
+    from: fromPeerId,
+    instanceId: fromInstanceId,
+    payload: JSON.stringify({
+      ...JSON.parse(message.payload),
+      fromInstanceId,
+      metadata: {
+        allowAgentAutoReply: true,
+        replyToInstanceId: fromInstanceId,
+        replyTool: "p2p_send_instance_message",
+      },
+    }),
+  };
+}
+
 function parseAck(sent: SentMessage[]): ApiDeliveryAckPayload {
   const ackMessage = sent.find((entry) => entry.message.type === "delivery-ack");
   assert.ok(ackMessage, "expected delivery-ack to be sent");
@@ -620,6 +642,209 @@ test("stalled inbound delivery resolves with timeout ACK and caches result", asy
   assert.deepEqual(JSON.parse(acks[1]!.message.payload), timeoutAck);
 });
 
+test("timeout ACK stops later target delivery after stalled target eventually resolves", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      if (request.channel === "feishu") {
+        await firstBlocked;
+      }
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 20,
+      inboundTargets: [
+        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+      ],
+    },
+  });
+
+  const handler = router.handleMessage(makeUserMessage("timeout-stops-later-target"));
+  await handler;
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.channel, "feishu");
+  const timeoutAck = parseAck(sent);
+  assert.equal(timeoutAck.ok, false);
+  assert.equal(timeoutAck.error, "inbound delivery timeout after 20ms");
+  assert.deepEqual(
+    timeoutAck.results?.map((result) => ({
+      id: result.id,
+      channel: result.channel,
+      target: result.target,
+      ok: result.ok,
+      error: result.error,
+    })),
+    [
+      {
+        id: "feishu-main",
+        channel: "feishu",
+        target: "user:ou_xxx",
+        ok: false,
+        error: "inbound delivery timeout after 20ms",
+      },
+    ],
+  );
+
+  releaseFirst();
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(
+    sent.filter((entry) => entry.message.type === "delivery-ack").length,
+    1,
+  );
+});
+
+test("delivery cache isolates same messageId from different valid senders", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([
+      makeRecord("sender-a@def.456", "peer-sender-a"),
+      makeRecord("sender-b@ghi.789", "peer-sender-b"),
+    ]),
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  await router.handleMessage(
+    makeUserMessageFrom("shared-message-id", "sender-a@def.456", "peer-sender-a"),
+  );
+  await router.handleMessage(
+    makeUserMessageFrom("shared-message-id", "sender-b@ghi.789", "peer-sender-b"),
+  );
+
+  assert.equal(deliveries.length, 2);
+  assert.deepEqual(
+    deliveries.map((request) => request.metadata.fromInstanceId),
+    ["sender-a@def.456", "sender-b@ghi.789"],
+  );
+  const acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 2);
+  assert.deepEqual(
+    acks.map((entry) => entry.peerId),
+    ["peer-sender-a", "peer-sender-b"],
+  );
+});
+
+test("stop prevents pending inbound handler from sending ACK after delivery resolves", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseDelivery!: () => void;
+  const deliveryBlocked = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      await deliveryBlocked;
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 5000,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const handler = router.handleMessage(makeUserMessage("stop-pending-inbound"));
+  await waitFor(() => deliveries.length === 1, "expected delivery to start");
+
+  await router.stop();
+  releaseDelivery();
+  await handler;
+
+  assert.equal(sent.filter((entry) => entry.message.type === "delivery-ack").length, 0);
+});
+
+test("sendInstanceMessage returns ACK inbound target and per-target results", async () => {
+  const sent: SentMessage[] = [];
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("receiver-remote@abc.123", "peer-remote")]),
+    delivery: {
+      async deliver(request) {
+        return { ok: true, channel: request.channel, target: request.target };
+      },
+    },
+    config: {
+      deliveryAckTimeoutMs: 1000,
+    },
+  });
+
+  const send = router.sendInstanceMessage("receiver-remote@abc.123", "hello");
+  await waitFor(
+    () => sent.some((entry) => entry.message.type === "user-message"),
+    "expected user-message to be sent",
+  );
+  const userMessage = sent.find((entry) => entry.message.type === "user-message");
+  assert.ok(userMessage, "expected user-message");
+  await router.handleMessage({
+    id: crypto.randomUUID(),
+    type: "delivery-ack",
+    from: "peer-remote",
+    instanceId: "receiver-remote@abc.123",
+    timestamp: Date.now(),
+    payload: JSON.stringify({
+      ackFor: userMessage.message.id,
+      ok: true,
+      deliveredAt: Date.now(),
+      inboundChannel: "feishu",
+      inboundTarget: "user:ou_xxx",
+      results: [
+        {
+          id: "feishu-main",
+          channel: "feishu",
+          target: "user:ou_xxx",
+          ok: true,
+        },
+      ],
+    }),
+  });
+
+  const result = await send;
+
+  assert.equal(result.delivered, true);
+  assert.equal(result.inboundChannel, "feishu");
+  assert.equal(result.inboundTarget, "user:ou_xxx");
+  assert.deepEqual(result.deliveryResults, [
+    {
+      id: "feishu-main",
+      channel: "feishu",
+      target: "user:ou_xxx",
+      ok: true,
+    },
+  ]);
+});
+
 test("pending delivery cache entries are not evicted before in-flight duplicate", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
@@ -659,9 +884,18 @@ test("pending delivery cache entries are not evicted before in-flight duplicate"
     setImmediate(resolve);
   });
 
-  assert.equal(deliveries.length, maxPending);
-  releaseDelivery();
-  await Promise.all([...handlers, duplicate]);
+  try {
+    assert.equal(deliveries.length, maxPending);
+
+    const oldestAcks = sent
+      .filter((entry) => entry.message.type === "delivery-ack")
+      .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+      .filter((ack) => ack.ackFor === "pending-message-0");
+    assert.equal(oldestAcks.length, 0);
+  } finally {
+    releaseDelivery();
+    await Promise.allSettled([...handlers, duplicate]);
+  }
 
   const oldestAcks = sent
     .filter((entry) => entry.message.type === "delivery-ack")
@@ -706,18 +940,20 @@ test("pending inbound deliveries are hard-capped before starting new unique deli
     "expected all pending deliveries to start",
   );
 
-  await router.handleMessage(makeUserMessage("hard-cap-overflow-message"));
+  try {
+    await router.handleMessage(makeUserMessage("hard-cap-overflow-message"));
 
-  assert.equal(deliveries.length, maxPending);
-  const overflowAck = sent
-    .filter((entry) => entry.message.type === "delivery-ack")
-    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
-    .find((ack) => ack.ackFor === "hard-cap-overflow-message");
-  assert.ok(overflowAck, "expected over-cap message to receive an ACK");
-  assert.equal(overflowAck.ok, false);
-  assert.deepEqual(overflowAck.results, []);
-  assert.equal(overflowAck.error, "too many pending inbound deliveries (1000)");
-
-  releaseDelivery();
-  await Promise.all(handlers);
+    assert.equal(deliveries.length, maxPending);
+    const overflowAck = sent
+      .filter((entry) => entry.message.type === "delivery-ack")
+      .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+      .find((ack) => ack.ackFor === "hard-cap-overflow-message");
+    assert.ok(overflowAck, "expected over-cap message to receive an ACK");
+    assert.equal(overflowAck.ok, false);
+    assert.deepEqual(overflowAck.results, []);
+    assert.equal(overflowAck.error, "too many pending inbound deliveries (1000)");
+  } finally {
+    releaseDelivery();
+    await Promise.allSettled(handlers);
+  }
 });
