@@ -1,4 +1,27 @@
-import type { InstanceRouter, MeshNetwork } from "./types.js";
+import type { DeliveryTargetResult, InstanceRouter, MeshNetwork } from "./types.js";
+
+function targetLabel(result: DeliveryTargetResult): string {
+  const id = result.id?.trim();
+  const location = `${result.channel} / ${result.target}`;
+  return id ? `${id} (${location})` : location;
+}
+
+function formatDeliveryResults(
+  instanceId: string,
+  delivered: boolean,
+  results: DeliveryTargetResult[],
+): string {
+  const header = delivered
+    ? `发往 ${instanceId} 的消息投递结果：`
+    : `发往 ${instanceId} 的消息投递失败：`;
+  const lines = results.map((result) => {
+    if (result.ok) {
+      return `- ${targetLabel(result)}：已送达`;
+    }
+    return `- ${targetLabel(result)}：失败：${result.error ?? "unknown error"}`;
+  });
+  return [header, ...lines].join("\n");
+}
 
 export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
   return [
@@ -323,6 +346,18 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
           };
         }
         const result = await router.sendInstanceMessage(instanceId, message);
+        if (result.deliveryResults && result.deliveryResults.length > 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: formatDeliveryResults(instanceId, result.delivered, result.deliveryResults),
+              },
+            ],
+            details: result,
+            isError: result.delivered ? undefined : true,
+          };
+        }
         if (!result.delivered) {
           return {
             content: [
