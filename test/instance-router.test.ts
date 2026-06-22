@@ -710,7 +710,59 @@ test("timeout ACK stops later target delivery after stalled target eventually re
   );
 });
 
-test("delivery cache isolates same messageId from different valid senders", async () => {
+test("delivery cache isolates same messageId from same sender instance on different peers", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const senderInstanceId = "sender@def.456";
+  let senderPeerId = "peer-sender-a";
+  const store = makeStore([makeRecord(senderInstanceId, senderPeerId)]);
+  store.resolve = async (instanceId: string) => {
+    if (instanceId !== senderInstanceId) {
+      return undefined;
+    }
+    return makeRecord(senderInstanceId, senderPeerId);
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store,
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  await router.handleMessage(
+    makeUserMessageFrom("shared-message-id", senderInstanceId, senderPeerId),
+  );
+  senderPeerId = "peer-sender-b";
+  await router.handleMessage(
+    makeUserMessageFrom("shared-message-id", senderInstanceId, senderPeerId),
+  );
+
+  assert.equal(deliveries.length, 2);
+  assert.deepEqual(
+    deliveries.map((request) => request.metadata.fromInstanceId),
+    [senderInstanceId, senderInstanceId],
+  );
+  const acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 2);
+  assert.deepEqual(
+    acks.map((entry) => entry.peerId),
+    ["peer-sender-a", "peer-sender-b"],
+  );
+  assert.deepEqual(
+    acks.map((entry) => (JSON.parse(entry.message.payload) as ApiDeliveryAckPayload).ackFor),
+    ["shared-message-id", "shared-message-id"],
+  );
+});
+
+test("delivery cache isolates same messageId from different sender instances on same peer", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
   const delivery: InboundDeliveryAdapter = {
@@ -722,8 +774,8 @@ test("delivery cache isolates same messageId from different valid senders", asyn
   const router = createInstanceRouter({
     mesh: makeMesh(sent),
     store: makeStore([
-      makeRecord("sender-a@def.456", "peer-sender-a"),
-      makeRecord("sender-b@ghi.789", "peer-sender-b"),
+      makeRecord("sender-a@def.456", "peer-sender"),
+      makeRecord("sender-b@ghi.789", "peer-sender"),
     ]),
     delivery,
     config: {
@@ -732,10 +784,10 @@ test("delivery cache isolates same messageId from different valid senders", asyn
   });
 
   await router.handleMessage(
-    makeUserMessageFrom("shared-message-id", "sender-a@def.456", "peer-sender-a"),
+    makeUserMessageFrom("shared-message-id", "sender-a@def.456", "peer-sender"),
   );
   await router.handleMessage(
-    makeUserMessageFrom("shared-message-id", "sender-b@ghi.789", "peer-sender-b"),
+    makeUserMessageFrom("shared-message-id", "sender-b@ghi.789", "peer-sender"),
   );
 
   assert.equal(deliveries.length, 2);
@@ -747,7 +799,11 @@ test("delivery cache isolates same messageId from different valid senders", asyn
   assert.equal(acks.length, 2);
   assert.deepEqual(
     acks.map((entry) => entry.peerId),
-    ["peer-sender-a", "peer-sender-b"],
+    ["peer-sender", "peer-sender"],
+  );
+  assert.deepEqual(
+    acks.map((entry) => (JSON.parse(entry.message.payload) as ApiDeliveryAckPayload).ackFor),
+    ["shared-message-id", "shared-message-id"],
   );
 });
 
