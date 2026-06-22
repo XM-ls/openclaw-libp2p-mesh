@@ -841,6 +841,63 @@ test("stop prevents pending inbound handler from sending ACK after delivery reso
   assert.equal(sent.filter((entry) => entry.message.type === "delivery-ack").length, 0);
 });
 
+test("stop during route resolve prevents inbound delivery and ACK", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let resolveEntered = false;
+  let releaseResolve!: () => void;
+  const resolveBlocked = new Promise<void>((resolve) => {
+    releaseResolve = resolve;
+  });
+  const store: InstancePeerStore = {
+    async load() {
+      return {
+        version: 1,
+        updatedAt: Date.now(),
+        instances: {
+          "sender@def.456": makeRecord("sender@def.456", "peer-sender"),
+        },
+      };
+    },
+    async list() {
+      return [makeRecord("sender@def.456", "peer-sender")];
+    },
+    async resolve(instanceId) {
+      resolveEntered = true;
+      await resolveBlocked;
+      return makeRecord(instanceId, "peer-sender");
+    },
+    async upsertFromAnnounce(payload) {
+      const record = makeRecord(payload.instanceId, payload.peerId);
+      return { record, changed: true, peerIdSharedBy: [] };
+    },
+  };
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store,
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const handler = router.handleMessage(makeUserMessage("stop-during-route-resolve"));
+  await waitFor(() => resolveEntered, "expected route resolve to start");
+
+  await router.stop();
+  releaseResolve();
+  await handler;
+
+  assert.equal(deliveries.length, 0);
+  assert.equal(sent.filter((entry) => entry.message.type === "delivery-ack").length, 0);
+});
+
 test("sendInstanceMessage returns ACK inbound target and per-target results", async () => {
   const sent: SentMessage[] = [];
   const router = createInstanceRouter({
@@ -1012,4 +1069,70 @@ test("pending inbound deliveries are hard-capped before starting new unique deli
     releaseDelivery();
     await Promise.allSettled(handlers);
   }
+});
+
+test("hard-cap failure ACK is cached as terminal result for retries", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseDelivery!: () => void;
+  const deliveryBlocked = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      await deliveryBlocked;
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 5000,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  // Mirrors the production MAX_DELIVERY_CACHE_ENTRIES cap.
+  const maxPending = 1000;
+  const messages = Array.from({ length: maxPending }, (_, index) =>
+    makeUserMessage(`hard-cap-terminal-pending-message-${index}`),
+  );
+  const handlers = messages.map((message) => router.handleMessage(message));
+  await waitFor(
+    () => deliveries.length === maxPending,
+    "expected all pending deliveries to start",
+  );
+
+  const overflowMessage = makeUserMessage("hard-cap-terminal-overflow-message");
+  let firstOverflowAck!: ApiDeliveryAckPayload;
+  try {
+    await router.handleMessage(overflowMessage);
+
+    assert.equal(deliveries.length, maxPending);
+    const overflowAck = sent
+      .filter((entry) => entry.message.type === "delivery-ack")
+      .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+      .find((ack) => ack.ackFor === overflowMessage.id);
+    assert.ok(overflowAck, "expected over-cap message to receive an ACK");
+    assert.equal(overflowAck.ok, false);
+    assert.deepEqual(overflowAck.results, []);
+    assert.equal(overflowAck.error, "too many pending inbound deliveries (1000)");
+    firstOverflowAck = overflowAck;
+  } finally {
+    releaseDelivery();
+    await Promise.allSettled(handlers);
+  }
+
+  await router.handleMessage(overflowMessage);
+
+  assert.equal(deliveries.length, maxPending);
+  const overflowAcks = sent
+    .filter((entry) => entry.message.type === "delivery-ack")
+    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+    .filter((ack) => ack.ackFor === overflowMessage.id);
+  assert.equal(overflowAcks.length, 2);
+  assert.deepEqual(overflowAcks[1], firstOverflowAck);
 });

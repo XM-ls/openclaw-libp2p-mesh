@@ -464,6 +464,9 @@ export function createInstanceRouter(options: {
       return;
     }
     const senderRoute = await store.resolve(payload.fromInstanceId);
+    if (stopped) {
+      return;
+    }
     if (!senderRoute || senderRoute.peerId !== msg.from) {
       logger?.warn?.(
         `[libp2p-mesh] Ignoring user-message from ${msg.from}; instance ${payload.fromInstanceId} is not routed to that peer`,
@@ -483,11 +486,11 @@ export function createInstanceRouter(options: {
     const cached = deliveryCache.get(cacheKey);
     if (cached) {
       const ack = cached.payload ?? (await cached.promise);
-      if (stopped) {
-        return;
-      }
       if (!ack) {
         throw new Error(`delivery cache entry for ${payload.messageId} has no ACK payload`);
+      }
+      if (stopped) {
+        return;
       }
       await sendAck(msg.from, ack);
       return;
@@ -501,6 +504,11 @@ export function createInstanceRouter(options: {
         error: `too many pending inbound deliveries (${MAX_DELIVERY_CACHE_ENTRIES})`,
         results: [],
       };
+      deliveryCache.set(cacheKey, { payload: ack });
+      trimDeliveryCache();
+      if (stopped) {
+        return;
+      }
       await sendAck(msg.from, ack);
       return;
     }
@@ -522,6 +530,9 @@ export function createInstanceRouter(options: {
     }
     deliveryCache.set(cacheKey, { payload: ack });
     trimDeliveryCache();
+    if (stopped) {
+      return;
+    }
     await sendAck(msg.from, ack);
   }
 
@@ -535,15 +546,11 @@ export function createInstanceRouter(options: {
 
   function trimDeliveryCache(): void {
     while (deliveryCache.size > MAX_DELIVERY_CACHE_ENTRIES) {
-      let deleted = false;
-      for (const [key, entry] of deliveryCache) {
-        if (entry.payload) {
-          deliveryCache.delete(key);
-          deleted = true;
-          break;
-        }
-      }
-      if (!deleted) return;
+      const settledKeys = Array.from(deliveryCache)
+        .filter(([, entry]) => entry.payload)
+        .map(([key]) => key);
+      if (settledKeys.length <= 1) return;
+      deliveryCache.delete(settledKeys[0]!);
     }
   }
 
