@@ -322,6 +322,29 @@ export function createInstanceRouter(options: {
     };
   }
 
+  function buildInboundTimeoutAck(messageId: string): DeliveryAckPayload {
+    const error = `inbound delivery timeout after ${ackTimeoutMs}ms`;
+    const results: DeliveryTargetResult[] = effectiveInboundTargets(config).map((target) => ({
+      id: target.id,
+      channel: target.channel,
+      target: target.target,
+      ok: false,
+      error: target.valid
+        ? error
+        : target.error ?? "inbound target channel and target are required",
+    }));
+    const selected = firstAttemptedResult(results);
+    return {
+      ackFor: messageId,
+      ok: false,
+      inboundChannel: selected?.channel,
+      inboundTarget: selected?.target,
+      deliveredAt: Date.now(),
+      error,
+      results,
+    };
+  }
+
   function withInboundDeliveryTimeout(
     promise: Promise<DeliveryAckPayload>,
     messageId: string,
@@ -331,13 +354,7 @@ export function createInstanceRouter(options: {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve({
-          ackFor: messageId,
-          ok: false,
-          deliveredAt: Date.now(),
-          error: `inbound delivery timeout after ${ackTimeoutMs}ms`,
-          results: [],
-        });
+        resolve(buildInboundTimeoutAck(messageId));
       }, ackTimeoutMs);
 
       promise

@@ -599,8 +599,18 @@ test("stalled inbound delivery resolves with timeout ACK and caches result", asy
   assert.equal(acks.length, 1);
   const timeoutAck = JSON.parse(acks[0]!.message.payload) as ApiDeliveryAckPayload;
   assert.equal(timeoutAck.ok, false);
-  assert.deepEqual(timeoutAck.results, []);
+  assert.equal(timeoutAck.inboundChannel, "feishu");
+  assert.equal(timeoutAck.inboundTarget, "user:ou_xxx");
   assert.equal(timeoutAck.error, "inbound delivery timeout after 20ms");
+  assert.deepEqual(timeoutAck.results, [
+    {
+      id: "feishu-main",
+      channel: "feishu",
+      target: "user:ou_xxx",
+      ok: false,
+      error: "inbound delivery timeout after 20ms",
+    },
+  ]);
 
   await router.handleMessage(message);
 
