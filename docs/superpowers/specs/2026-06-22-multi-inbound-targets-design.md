@@ -1,14 +1,14 @@
-# Multi Inbound Targets Design
+# 多入站目标设计
 
-## Goal
+## 目标
 
-Extend `libp2p-mesh` inbound delivery so a receiving OpenClaw instance can deliver one incoming P2P user message to one or more locally configured channel conversations.
+扩展 `libp2p-mesh` 的入站投递能力，让接收方 OpenClaw 实例可以把一条收到的 P2P 用户消息投递到一个或多个本地配置的 channel 会话中。
 
-The sender continues to address only the receiver's `instanceId`. The sender does not choose the receiver's channel, target, or conversation. The receiving instance owns that routing policy through its local plugin config.
+发送方仍然只通过接收方的 `instanceId` 寻址。发送方不能选择接收方的 channel、target 或具体会话。接收方通过自己的本地插件配置决定消息最终显示在哪里。
 
-## Current Behavior
+## 当前行为
 
-Today the plugin supports one inbound display target:
+当前插件只支持一个入站显示目标：
 
 ```json
 {
@@ -18,13 +18,13 @@ Today the plugin supports one inbound display target:
 }
 ```
 
-When `p2p_send_instance_message` sends a `user-message`, the receiver forwards the text to `inboundChannel/inboundTarget` and returns one `delivery-ack`.
+当 `p2p_send_instance_message` 发送 `user-message` 后，接收方会把文本转发到 `inboundChannel/inboundTarget`，然后返回一个 `delivery-ack`。
 
-This design keeps that behavior valid for existing users.
+本设计会继续保留这个行为，保证现有用户配置升级后仍然可用。
 
-## Proposed Configuration
+## 新增配置
 
-Add an optional `inboundTargets` array:
+新增一个可选的 `inboundTargets` 数组：
 
 ```json
 {
@@ -43,13 +43,13 @@ Add an optional `inboundTargets` array:
 }
 ```
 
-Fields:
+字段含义：
 
-- `id`: optional stable local display name for logs and ACK output. It does not affect delivery.
-- `channel`: OpenClaw channel name, for example `feishu`.
-- `target`: that channel's receiving conversation, for example `user:ou_xxx` or `chat:123456`.
+- `id`：可选的本地显示名，用于日志和 ACK 展示；不参与真实投递。
+- `channel`：OpenClaw channel 名称，例如 `feishu`。
+- `target`：该 channel 的接收会话，例如 `user:ou_xxx` 或 `chat:123456`。
 
-Runtime target selection:
+运行时目标选择规则：
 
 ```text
 if inboundTargets is present:
@@ -58,11 +58,15 @@ else:
   fall back to inboundChannel + inboundTarget
 ```
 
-An empty `inboundTargets: []` means no inbound targets are configured. It does not fall back to the legacy single-target fields.
+也就是说：
 
-## Compatibility
+- 如果存在 `inboundTargets` 字段，就使用 `inboundTargets`。
+- 如果不存在 `inboundTargets` 字段，才回退到旧的 `inboundChannel/inboundTarget`。
+- 如果配置了 `inboundTargets: []`，表示没有入站目标，不再回退旧字段。
 
-Existing configs remain valid and keep the same behavior:
+## 兼容性
+
+旧配置继续有效，行为不变：
 
 ```json
 {
@@ -73,11 +77,13 @@ Existing configs remain valid and keep the same behavior:
 }
 ```
 
-Users who want multi-channel delivery only add `inboundTargets`. If both legacy fields and `inboundTargets` are present, `inboundTargets` wins to avoid duplicate delivery.
+想启用多 channel 投递的用户，只需要新增 `inboundTargets`。
 
-## Message Flow
+如果旧字段和 `inboundTargets` 同时存在，以 `inboundTargets` 为准，避免同一个消息被重复投递。
 
-The sender-side tool contract stays unchanged:
+## 消息流程
+
+发送方工具契约保持不变：
 
 ```json
 {
@@ -86,25 +92,25 @@ The sender-side tool contract stays unchanged:
 }
 ```
 
-Flow:
+完整流程：
 
 ```text
-sender user
--> sender Agent calls p2p_send_instance_message(instanceId, message)
--> sender sends one P2P user-message
--> receiver InstanceRouter validates the message
--> receiver computes effective inbound targets
--> receiver delivers to each target through OpenClaw runtime channel outbound adapters
--> receiver aggregates per-target results
--> receiver returns one delivery-ack
--> sender tool displays each target's delivery status
+发送方用户
+-> 发送方 Agent 调用 p2p_send_instance_message(instanceId, message)
+-> 发送方发出一条 P2P user-message
+-> 接收方 InstanceRouter 校验消息
+-> 接收方计算有效入站目标
+-> 接收方通过 OpenClaw runtime channel outbound adapter 逐个投递
+-> 接收方汇总每个目标的投递结果
+-> 接收方返回一个 delivery-ack
+-> 发送方工具展示每个目标的投递状态
 ```
 
-The P2P protocol still sends one `user-message`. Fan-out happens only inside the receiving OpenClaw instance.
+P2P 协议层仍然只发送一条 `user-message`。多目标 fan-out 只发生在接收方 OpenClaw 实例内部。
 
-## ACK Shape
+## ACK 结构
 
-Extend `delivery-ack` with per-target results:
+扩展 `delivery-ack`，增加逐目标结果：
 
 ```json
 {
@@ -129,22 +135,28 @@ Extend `delivery-ack` with per-target results:
 }
 ```
 
-`ok` is `true` when at least one target result has `ok: true`.
+`ok` 的定义：
 
-The legacy fields remain available for compatibility:
+```text
+results 中至少有一个目标 ok=true，则整体 ok=true
+```
+
+原因是：只要接收方至少有一个主会话框收到消息，就说明消息已经对接收方可见。其他 channel 的失败仍然需要在明细中展示。
+
+为了兼容旧逻辑，`DeliveryAckPayload` 继续保留旧字段：
 
 ```ts
 inboundChannel?: string;
 inboundTarget?: string;
 ```
 
-For multi-target ACKs, those fields may point to the first successful target. If all targets fail, they may point to the first attempted target.
+多目标 ACK 中，这两个旧字段可以指向第一个成功目标。如果全部失败，则可以指向第一个尝试投递的目标。
 
-## Sender Display
+## 发送方展示
 
-The sender tool must not collapse multi-target delivery into only success, partial success, or failure. It should show each target result.
+发送方工具不能只展示“成功 / 部分成功 / 失败”这种摘要。它必须展示每个 target 的具体结果。
 
-At least one target delivered:
+至少一个目标投递成功时：
 
 ```text
 Message delivery results for ypp@xxx:
@@ -152,7 +164,7 @@ Message delivery results for ypp@xxx:
 - telegram-main (telegram / chat:123456): failed: Bot has NO availability to this user.
 ```
 
-All targets failed:
+全部目标投递失败时：
 
 ```text
 Failed to deliver message to ypp@xxx:
@@ -160,35 +172,35 @@ Failed to deliver message to ypp@xxx:
 - telegram-main (telegram / chat:123456): failed: channel telegram does not expose runtime text delivery
 ```
 
-Tool error behavior:
+工具错误状态规则：
 
-- At least one success: `isError` is not set, but failed target details are shown.
-- All failed: `isError: true`.
-- ACK timeout: keep the existing timeout failure path.
+- 至少一个目标成功：不设置 `isError`，但文本中必须展示失败目标明细。
+- 全部目标失败：设置 `isError: true`。
+- ACK 超时：保持现有超时失败路径。
 
-## Error Handling
+## 错误处理
 
-Target computation:
+目标计算规则：
 
-- `inboundTargets` missing: use legacy `inboundChannel/inboundTarget`.
-- `inboundTargets` empty: return failed ACK with `error: "inbound delivery is not configured"`.
-- Legacy fields missing and no `inboundTargets`: return failed ACK with the same error.
+- `inboundTargets` 缺失：使用旧的 `inboundChannel/inboundTarget`。
+- `inboundTargets` 为空数组：返回失败 ACK，错误为 `inbound delivery is not configured`。
+- 没有 `inboundTargets`，旧字段也缺失：返回同样的未配置失败 ACK。
 
-Per-target delivery:
+逐目标投递规则：
 
-- Invalid target item: return a failed result for that item and continue with the rest.
-- Channel adapter missing or no `sendText`: return a failed result for that target.
-- Channel permission failure, such as Feishu bot availability errors: return a failed result with the adapter error summary.
-- Partial failure does not stop later targets from being attempted.
+- 某个目标配置不完整：为该目标返回失败结果，并继续处理其他目标。
+- channel adapter 不存在或没有 `sendText`：为该目标返回失败结果。
+- channel 权限失败，例如 Feishu bot 不可用：为该目标返回失败结果，错误中包含 adapter 返回的摘要。
+- 部分失败不会阻止后续目标继续投递。
 
-Duplicate handling:
+重复处理规则：
 
-- Deduplicate identical targets by `channel + "\0" + target` before delivery.
-- If a duplicate P2P `messageId` arrives, reuse the cached ACK and do not deliver again.
+- 使用 `channel + "\0" + target` 对完全相同的目标去重。
+- 如果收到重复的 P2P `messageId`，复用缓存的 ACK，不重新投递，避免重复通知用户。
 
-## Data Model
+## 数据模型
 
-Add types:
+新增类型：
 
 ```ts
 export interface InboundTargetConfig {
@@ -206,7 +218,7 @@ export interface DeliveryTargetResult {
 }
 ```
 
-Extend existing types:
+扩展现有类型：
 
 ```ts
 export interface MeshConfig {
@@ -218,31 +230,31 @@ export interface DeliveryAckPayload {
 }
 ```
 
-The existing `InboundDeliveryAdapter.deliver()` can remain single-target. `InstanceRouter` should call it once per effective target and aggregate the results.
+现有 `InboundDeliveryAdapter.deliver()` 可以继续保持单目标接口。`InstanceRouter` 负责对每个有效目标调用一次 `deliver()`，再聚合结果。
 
-## Testing Strategy
+## 测试策略
 
-Unit tests should cover:
+单元测试需要覆盖：
 
-- Legacy single-target config still delivers once.
-- Non-empty `inboundTargets` overrides legacy fields.
-- Empty `inboundTargets` returns an unconfigured failure.
-- Multiple targets all succeed.
-- Mixed success and failure returns `ok: true` plus all result details.
-- All targets fail returns `ok: false` and all errors.
-- Duplicate channel/target entries are delivered once.
-- Duplicate P2P `messageId` returns cached ACK without repeat delivery.
-- Sender tool formats per-target results and marks only all-failed delivery as `isError`.
+- 旧单目标配置仍然只投递一次。
+- 非空 `inboundTargets` 会覆盖旧字段。
+- 空 `inboundTargets` 返回未配置失败。
+- 多个目标全部成功。
+- 部分成功部分失败时，整体 `ok: true`，并返回所有目标明细。
+- 全部失败时，整体 `ok: false`，并返回所有错误。
+- 重复的 channel/target 只投递一次。
+- 重复 P2P `messageId` 返回缓存 ACK，不重复投递。
+- 发送方工具格式化逐目标结果，并且只有全部失败时才设置 `isError`。
 
-Schema tests should cover:
+Schema 测试需要覆盖：
 
-- `openclaw.plugin.json` accepts `inboundTargets`.
-- `id` is optional.
-- Each target requires `channel` and `target`.
+- `openclaw.plugin.json` 接受 `inboundTargets`。
+- `id` 是可选字段。
+- 每个 target 必须包含 `channel` 和 `target`。
 
-## Non-Goals
+## 非目标
 
-- The sender cannot choose the receiver's channel.
-- The sender cannot pass `target` or channel-specific routing hints.
-- The plugin does not auto-discover a channel's main conversation.
-- The plugin does not fan out to every configured OpenClaw channel unless the receiver explicitly lists those targets in `inboundTargets`.
+- 不允许发送方选择接收方 channel。
+- 不允许发送方传入 `target` 或 channel-specific routing hints。
+- 插件不自动发现某个 channel 的“主会话”。
+- 插件不会自动 fan-out 到所有已配置的 OpenClaw channel；只有接收方在 `inboundTargets` 中显式列出的目标才会收到消息。
