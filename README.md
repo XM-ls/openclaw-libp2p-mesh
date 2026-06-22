@@ -335,9 +335,9 @@ To display the same inbound P2P message in multiple local OpenClaw channel targe
             "target": "user:ou_xxx"
           },
           {
-            "id": "feishu-chat",
-            "channel": "feishu",
-            "target": "chat:oc_xxx"
+            "id": "telegram-chat",
+            "channel": "telegram",
+            "target": "chat:123456"
           }
         ],
         "deliveryAckTimeoutMs": 15000
