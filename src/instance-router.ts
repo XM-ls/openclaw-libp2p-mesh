@@ -377,9 +377,15 @@ export function createInstanceRouter(options: {
 
   function trimDeliveryCache(): void {
     while (deliveryCache.size > MAX_DELIVERY_CACHE_ENTRIES) {
-      const oldestKey = deliveryCache.keys().next().value as string | undefined;
-      if (!oldestKey) return;
-      deliveryCache.delete(oldestKey);
+      let deleted = false;
+      for (const [key, entry] of deliveryCache) {
+        if (entry.payload) {
+          deliveryCache.delete(key);
+          deleted = true;
+          break;
+        }
+      }
+      if (!deleted) return;
     }
   }
 
