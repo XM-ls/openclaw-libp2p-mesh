@@ -42,29 +42,49 @@ openclaw plugins registry --refresh
 
 The published npm package includes compiled JavaScript under `dist/`, so OpenClaw and acpx can load it directly.
 
-Then add to your `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns"
-      }
-    }
-  },
-  "channels": {
-    "libp2p-mesh": {
-      "enabled": true
-    }
-  }
-}
-```
-
 ## Configuration
 
-Add a `libp2p-mesh` block to your `openclaw.json` under `plugins`:
+### Quick Setup (Recommended)
+
+After installation, run the interactive setup wizard:
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+The wizard will guide you through:
+- Discovery mode (mDNS / Bootstrap / DHT)
+- Bootstrap peer addresses (for cross-network scenarios)
+- Inbound channel targets (where to display received P2P messages)
+- Optional: NAT traversal, circuit relay, fixed ports, and custom instance name
+
+The configuration is written to `~/.openclaw/openclaw.json` automatically.
+
+### Incremental Config Management
+
+```bash
+# View all current non-default settings
+openclaw libp2p-mesh config list
+
+# Read a single value
+openclaw libp2p-mesh config get discovery
+
+# Set a value
+openclaw libp2p-mesh config set discovery bootstrap
+
+# Add to an array
+openclaw libp2p-mesh config set bootstrapList --add /ip4/10.0.0.5/tcp/4001/p2p/12D3KooW...
+
+# Remove from an array
+openclaw libp2p-mesh config set bootstrapList --remove /ip4/203.0.113.10/tcp/4001/p2p/12D3KooW...
+
+# Reset a key to default
+openclaw libp2p-mesh config unset relayList
+```
+
+### Manual Configuration (Advanced)
+
+You can still directly edit `~/.openclaw/openclaw.json`:
 
 ### Minimal LAN Setup (Default)
 
