@@ -1,6 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/core";
 import type { OpenClawPluginConfigSchema } from "openclaw/plugin-sdk/core";
 import { registerLibp2pMesh } from "./src/plugin.js";
+import { registerLibp2pMeshCli } from "./src/cli.js";
 
 function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
   return {
@@ -167,5 +168,11 @@ export default definePluginEntry({
   name: "libp2p Mesh Network",
   description: "P2P network for cross-instance agent communication via libp2p.",
   configSchema: createLibp2pMeshConfigSchema(),
-  register: registerLibp2pMesh,
+  register: (api) => {
+    registerLibp2pMesh(api);
+    // 5. Register CLI commands (setup wizard + config management)
+    api.registerCli(registerLibp2pMeshCli, {
+      commands: ["libp2p-mesh"],
+    });
+  },
 });
