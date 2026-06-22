@@ -396,7 +396,7 @@ export function createInstanceRouter(options: {
     const selected = firstAttemptedResult(results);
     return {
       ackFor: messageId,
-      ok: false,
+      ok: results.some((result) => result.ok),
       inboundChannel: selected?.channel,
       inboundTarget: selected?.target,
       deliveredAt: Date.now(),

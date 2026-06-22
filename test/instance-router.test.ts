@@ -642,6 +642,59 @@ test("stalled inbound delivery resolves with timeout ACK and caches result", asy
   assert.deepEqual(JSON.parse(acks[1]!.message.payload), timeoutAck);
 });
 
+test("timeout ACK preserves prior successful target result", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      if (request.channel === "telegram") {
+        return new Promise(() => {});
+      }
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 20,
+      inboundTargets: [
+        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage("timeout-after-prior-success"));
+
+  assert.deepEqual(
+    deliveries.map((request) => `${request.channel}/${request.target}`),
+    ["feishu/user:ou_xxx", "telegram/chat:123456"],
+  );
+  const timeoutAck = parseAck(sent);
+  assert.equal(timeoutAck.ok, true);
+  assert.equal(timeoutAck.inboundChannel, "feishu");
+  assert.equal(timeoutAck.inboundTarget, "user:ou_xxx");
+  assert.equal(timeoutAck.error, "inbound delivery timeout after 20ms");
+  assert.deepEqual(timeoutAck.results, [
+    {
+      id: "feishu-main",
+      channel: "feishu",
+      target: "user:ou_xxx",
+      ok: true,
+    },
+    {
+      id: "telegram-main",
+      channel: "telegram",
+      target: "chat:123456",
+      ok: false,
+      error: "inbound delivery timeout after 20ms",
+    },
+  ]);
+});
+
 test("timeout ACK stops later target delivery after stalled target eventually resolves", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
