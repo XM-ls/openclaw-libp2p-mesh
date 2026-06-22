@@ -1046,6 +1046,13 @@ test("sendInstanceMessage returns ACK inbound target and per-target results", as
           target: "user:ou_xxx",
           ok: true,
         },
+        {
+          id: "telegram-backup",
+          channel: "telegram",
+          target: "chat:123456",
+          ok: false,
+          error: "telegram delivery failed",
+        },
       ],
     }),
   });
@@ -1061,6 +1068,13 @@ test("sendInstanceMessage returns ACK inbound target and per-target results", as
       channel: "feishu",
       target: "user:ou_xxx",
       ok: true,
+    },
+    {
+      id: "telegram-backup",
+      channel: "telegram",
+      target: "chat:123456",
+      ok: false,
+      error: "telegram delivery failed",
     },
   ]);
 });
