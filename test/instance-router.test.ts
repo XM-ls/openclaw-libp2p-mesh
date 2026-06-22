@@ -139,10 +139,10 @@ function makeUserMessage(messageId = "message-1"): P2PMessage {
   };
 }
 
-function parseAck(sent: SentMessage[]) {
+function parseAck(sent: SentMessage[]): ApiDeliveryAckPayload {
   const ackMessage = sent.find((entry) => entry.message.type === "delivery-ack");
   assert.ok(ackMessage, "expected delivery-ack to be sent");
-  return JSON.parse(ackMessage.message.payload);
+  return JSON.parse(ackMessage.message.payload) as ApiDeliveryAckPayload;
 }
 
 test("legacy single-target config still delivers once", async () => {
@@ -284,4 +284,121 @@ test("plugin entry schema exposes inboundTargets runtime config", () => {
   assert.equal(inboundTargetsSchema.type, "array");
   assert.deepEqual(inboundTargetsSchema.items.required, ["channel", "target"]);
   assert.equal(inboundTargetsSchema.items.additionalProperties, false);
+});
+
+test("mixed target results return ok true with every target result", async () => {
+  const sent: SentMessage[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      if (request.channel === "telegram") {
+        return {
+          ok: false,
+          channel: request.channel,
+          target: request.target,
+          error: "机器人对该用户没有可用权限",
+        };
+      }
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, true);
+  assert.equal(ack.inboundChannel, "feishu");
+  assert.equal(ack.inboundTarget, "user:ou_xxx");
+  assert.deepEqual(
+    ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
+      id: result.id,
+      ok: result.ok,
+      error: result.error,
+    })),
+    [
+      { id: "feishu-main", ok: true, error: undefined },
+      { id: "telegram-main", ok: false, error: "机器人对该用户没有可用权限" },
+    ],
+  );
+});
+
+test("all target failures return ok false with all errors", async () => {
+  const sent: SentMessage[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      return {
+        ok: false,
+        channel: request.channel,
+        target: request.target,
+        error: `${request.channel} unavailable`,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, false);
+  assert.equal(ack.inboundChannel, "feishu");
+  assert.equal(ack.inboundTarget, "user:ou_xxx");
+  assert.deepEqual(
+    ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
+      id: result.id,
+      ok: result.ok,
+      error: result.error,
+    })),
+    [
+      { id: "feishu-main", ok: false, error: "feishu unavailable" },
+      { id: "telegram-main", ok: false, error: "telegram unavailable" },
+    ],
+  );
+});
+
+test("duplicate messageId reuses cached ACK without repeat delivery", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const message = makeUserMessage("duplicate-message");
+  await router.handleMessage(message);
+  await router.handleMessage(message);
+
+  assert.equal(deliveries.length, 1);
+  const acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 2);
+  assert.deepEqual(JSON.parse(acks[0]!.message.payload), JSON.parse(acks[1]!.message.payload));
 });
