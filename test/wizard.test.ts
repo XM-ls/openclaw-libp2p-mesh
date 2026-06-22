@@ -1,23 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-// Types that wizard.ts will export
-interface PromptChoice {
-  label: string;
-  value: string;
-  hint?: string;
-}
-
-interface WizardPrompter {
-  question(prompt: string, defaultValue?: string): Promise<string>;
-  confirm(prompt: string, defaultValue?: boolean): Promise<boolean>;
-  select(prompt: string, choices: PromptChoice[]): Promise<string>;
-  multiline(prompt: string, helpText?: string): Promise<string[]>;
-  displayBox(title: string, lines: string[]): void;
-  displaySuccess(message: string): void;
-  displayError(message: string): void;
-  displayWarning(message: string): void;
-}
+import { validateMultiaddr, PromptChoice, WizardPrompter, runSetupWizard, WizardCancelledError } from "../src/wizard.js";
 
 describe("validateMultiaddr", () => {
   it("accepts valid IPv4 multiaddr with peer id", () => {
@@ -66,7 +49,10 @@ describe("runSetupWizard", () => {
   it("produces mdns config when user selects mdns", async () => {
     const mockPrompter: WizardPrompter = {
       question: async () => "",
-      confirm: async () => false,
+      confirm: async (prompt: string) => {
+        if (prompt.includes("确认写入")) return true;
+        return false;
+      },
       select: async (_prompt, choices) => choices[0]!.value, // always pick first
       multiline: async () => [],
       displayBox: () => {},
@@ -87,7 +73,10 @@ describe("runSetupWizard", () => {
         if (prompt.includes("接收目标")) return "user:ou_abc123";
         return "";
       },
-      confirm: async () => false,
+      confirm: async (prompt: string) => {
+        if (prompt.includes("确认写入")) return true;
+        return false;
+      },
       select: async () => {
         selectCall++;
         return "bootstrap"; // discovery mode
@@ -112,6 +101,7 @@ describe("runSetupWizard", () => {
     const mockPrompter: WizardPrompter = {
       question: async () => "user:ou_abc123",
       confirm: async (prompt: string) => {
+        if (prompt.includes("确认写入")) return true;
         if (prompt.includes("不同网络")) {
           confirmCalled = true;
           return false;
@@ -141,6 +131,7 @@ describe("runSetupWizard", () => {
         return "";
       },
       confirm: async (prompt: string) => {
+        if (prompt.includes("更多接收目标")) return false;
         if (prompt.includes("不同网络")) return true;
         if (prompt.includes("固定端口")) return true;
         if (prompt.includes("NAT 穿透")) return true;
@@ -181,6 +172,7 @@ describe("runSetupWizard", () => {
           confirmCount++;
           return confirmCount === 1; // yes first time, no second
         }
+        if (prompt.includes("确认写入")) return true;
         return false;
       },
       select: async () => "mdns",
