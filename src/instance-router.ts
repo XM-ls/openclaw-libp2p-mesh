@@ -406,6 +406,18 @@ export function createInstanceRouter(options: {
       return;
     }
 
+    if (pendingDeliveryCount() >= MAX_DELIVERY_CACHE_ENTRIES) {
+      const ack: DeliveryAckPayload = {
+        ackFor: payload.messageId,
+        ok: false,
+        deliveredAt: Date.now(),
+        error: `too many pending inbound deliveries (${MAX_DELIVERY_CACHE_ENTRIES})`,
+        results: [],
+      };
+      await sendAck(msg.from, ack);
+      return;
+    }
+
     const ackPromise = withInboundDeliveryTimeout(
       Promise.resolve().then(() => deliverAndBuildAck(payload, msg)),
       payload.messageId,
@@ -416,6 +428,14 @@ export function createInstanceRouter(options: {
     deliveryCache.set(payload.messageId, { peerId: msg.from, payload: ack });
     trimDeliveryCache();
     await sendAck(msg.from, ack);
+  }
+
+  function pendingDeliveryCount(): number {
+    let count = 0;
+    for (const entry of deliveryCache.values()) {
+      if (entry.promise && !entry.payload) count += 1;
+    }
+    return count;
   }
 
   function trimDeliveryCache(): void {

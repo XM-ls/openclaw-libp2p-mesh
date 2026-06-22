@@ -633,18 +633,23 @@ test("pending delivery cache entries are not evicted before in-flight duplicate"
     },
   });
 
-  const messages = Array.from({ length: 1001 }, (_, index) =>
+  // Mirrors the production MAX_DELIVERY_CACHE_ENTRIES cap.
+  const maxPending = 1000;
+  const messages = Array.from({ length: maxPending }, (_, index) =>
     makeUserMessage(`pending-message-${index}`),
   );
   const handlers = messages.map((message) => router.handleMessage(message));
-  await waitFor(() => deliveries.length === 1001, "expected all pending deliveries to start");
+  await waitFor(
+    () => deliveries.length === maxPending,
+    "expected all pending deliveries to start",
+  );
 
   const duplicate = router.handleMessage(messages[0]!);
   await new Promise<void>((resolve) => {
     setImmediate(resolve);
   });
 
-  assert.equal(deliveries.length, 1001);
+  assert.equal(deliveries.length, maxPending);
   releaseDelivery();
   await Promise.all([...handlers, duplicate]);
 
@@ -654,4 +659,55 @@ test("pending delivery cache entries are not evicted before in-flight duplicate"
     .filter((ack) => ack.ackFor === "pending-message-0");
   assert.equal(oldestAcks.length, 2);
   assert.deepEqual(oldestAcks[0], oldestAcks[1]);
+});
+
+test("pending inbound deliveries are hard-capped before starting new unique deliveries", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseDelivery!: () => void;
+  const deliveryBlocked = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      await deliveryBlocked;
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 5000,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  // Mirrors the production MAX_DELIVERY_CACHE_ENTRIES cap.
+  const maxPending = 1000;
+  const messages = Array.from({ length: maxPending }, (_, index) =>
+    makeUserMessage(`hard-cap-pending-message-${index}`),
+  );
+  const handlers = messages.map((message) => router.handleMessage(message));
+  await waitFor(
+    () => deliveries.length === maxPending,
+    "expected all pending deliveries to start",
+  );
+
+  await router.handleMessage(makeUserMessage("hard-cap-overflow-message"));
+
+  assert.equal(deliveries.length, maxPending);
+  const overflowAck = sent
+    .filter((entry) => entry.message.type === "delivery-ack")
+    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+    .find((ack) => ack.ackFor === "hard-cap-overflow-message");
+  assert.ok(overflowAck, "expected over-cap message to receive an ACK");
+  assert.equal(overflowAck.ok, false);
+  assert.deepEqual(overflowAck.results, []);
+  assert.equal(overflowAck.error, "too many pending inbound deliveries (1000)");
+
+  releaseDelivery();
+  await Promise.all(handlers);
 });
