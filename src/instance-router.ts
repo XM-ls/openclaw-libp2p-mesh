@@ -1,6 +1,8 @@
 import type {
   DeliveryAckPayload,
+  DeliveryTargetResult,
   InboundDeliveryAdapter,
+  InboundTargetConfig,
   InstanceAnnouncePayload,
   InstancePeerStore,
   InstanceRouter,
@@ -44,6 +46,67 @@ function isNonEmptyString(value: unknown): value is string {
 
 function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type EffectiveInboundTarget = {
+  id?: string;
+  channel: string;
+  target: string;
+  valid: boolean;
+  error?: string;
+};
+
+function displayTargetId(target: { id?: string; channel?: string; target?: string }): string | undefined {
+  return target.id?.trim() || undefined;
+}
+
+function normalizeConfiguredTarget(target: InboundTargetConfig): EffectiveInboundTarget {
+  const channel = typeof target.channel === "string" ? target.channel.trim() : "";
+  const destination = typeof target.target === "string" ? target.target.trim() : "";
+  const normalized: EffectiveInboundTarget = {
+    id: displayTargetId(target),
+    channel,
+    target: destination,
+    valid: Boolean(channel && destination),
+  };
+  if (!normalized.valid) {
+    normalized.error = "inbound target channel and target are required";
+  }
+  return normalized;
+}
+
+function effectiveInboundTargets(config: MeshConfig): EffectiveInboundTarget[] {
+  if (Array.isArray(config.inboundTargets)) {
+    const seen = new Set<string>();
+    const targets: EffectiveInboundTarget[] = [];
+    for (const target of config.inboundTargets) {
+      const normalized = normalizeConfiguredTarget(target);
+      const key = `${normalized.channel}\0${normalized.target}`;
+      if (normalized.valid && seen.has(key)) {
+        continue;
+      }
+      if (normalized.valid) {
+        seen.add(key);
+      }
+      targets.push(normalized);
+    }
+    return targets;
+  }
+
+  if (!config.inboundChannel || !config.inboundTarget) {
+    return [];
+  }
+  return [
+    {
+      channel: config.inboundChannel,
+      target: config.inboundTarget,
+      valid: true,
+    },
+  ];
+}
+
+function firstAttemptedResult(results: DeliveryTargetResult[]): DeliveryTargetResult | undefined {
+  return results.find((result) => result.ok) ?? results[0];
 }
 
 export function createInstanceRouter(options: {
