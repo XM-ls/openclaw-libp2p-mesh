@@ -4,8 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-// We'll import from ../src/config-io.js once Task 2 implements it.
-// For now, describe what we test — the file will fail to compile until Task 2.
+import {
+  getDefaultConfig,
+  resolveConfigPath,
+  readFullConfig,
+  writeFullConfig,
+  getNonDefaultConfig,
+  MULTIADDR_PATTERN,
+} from "../src/config-io.js";
 
 describe("config-io", () => {
   const tmpDir = path.join(os.tmpdir(), `libp2p-mesh-config-io-test-${Date.now()}`);
@@ -16,6 +22,11 @@ describe("config-io", () => {
   });
 
   after(() => {
+    try {
+      fs.chmodSync(tmpDir, 0o755);
+    } catch {
+      // ignore
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -25,40 +36,74 @@ describe("config-io", () => {
   }
 
   it("resolveConfigPath respects OPENCLAW_CONFIG_PATH", () => {
-    // Test that env var takes precedence
+    const saved = process.env.OPENCLAW_CONFIG_PATH;
+    try {
+      process.env.OPENCLAW_CONFIG_PATH = "/custom/path/config.json";
+      const result = resolveConfigPath();
+      assert.equal(result, path.resolve("/custom/path/config.json"));
+    } finally {
+      if (saved === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = saved;
+      }
+    }
   });
 
   it("resolveConfigPath falls back to ~/.openclaw/openclaw.json", () => {
-    // Test default path
+    const savedConfig = process.env.OPENCLAW_CONFIG_PATH;
+    const savedState = process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_CONFIG_PATH;
+    delete process.env.OPENCLAW_STATE_DIR;
+    try {
+      const result = resolveConfigPath();
+      assert.equal(result, path.join(os.homedir(), ".openclaw", "openclaw.json"));
+    } finally {
+      if (savedConfig === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = savedConfig;
+      }
+      if (savedState === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = savedState;
+      }
+    }
   });
 
   it("readFullConfig returns empty pluginConfig when config file does not exist", () => {
-    // Non-existing file → empty config
+    const result = readFullConfig("/tmp/nonexistent-openclaw-config.json");
+    assert.deepEqual(result.pluginConfig, {});
+    assert.deepEqual(result.config, {});
   });
 
   it("readFullConfig returns empty pluginConfig when plugin not in config", () => {
     writeFile(configPath, JSON.stringify({ plugins: { entries: { other: { enabled: true } } } }, null, 2));
-    // readFullConfig should return {} for pluginConfig
+    const result = readFullConfig(configPath);
+    assert.deepEqual(result.pluginConfig, {});
   });
 
   it("readFullConfig returns existing plugin config", () => {
     writeFile(configPath, JSON.stringify({
       plugins: { entries: { "libp2p-mesh": { enabled: true, config: { discovery: "mdns" } } } },
-      channels: { "libp2p-mesh": { enabled: true } }
+      channels: { "libp2p-mesh": { enabled: true } },
     }, null, 2));
-    // readFullConfig should return { discovery: "mdns" } for pluginConfig
+    const result = readFullConfig(configPath);
+    assert.equal(result.pluginConfig.discovery, "mdns");
   });
 
   it("readFullConfig throws on malformed JSON", () => {
     writeFile(configPath, "not json {{{");
     assert.throws(() => {
-      // readFullConfig(configPath)
+      readFullConfig(configPath);
     });
   });
 
   it("writeFullConfig creates file when it does not exist", () => {
     const newPath = path.join(tmpDir, "new-openclaw.json");
-    // writeFullConfig(newPath, { discovery: "bootstrap" })
+    if (fs.existsSync(newPath)) fs.unlinkSync(newPath);
+    writeFullConfig(newPath, { discovery: "bootstrap" });
     const raw = JSON.parse(fs.readFileSync(newPath, "utf-8"));
     assert.equal(raw.plugins.entries["libp2p-mesh"].enabled, true);
     assert.equal(raw.channels["libp2p-mesh"].enabled, true);
@@ -69,7 +114,7 @@ describe("config-io", () => {
     writeFile(configPath, JSON.stringify({
       plugins: { entries: { "other-plugin": { enabled: true, config: { key: "val" } } } },
     }, null, 2));
-    // writeFullConfig(configPath, { discovery: "dht" })
+    writeFullConfig(configPath, { discovery: "dht" });
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     assert.equal(raw.plugins.entries["other-plugin"].config.key, "val");
     assert.equal(raw.plugins.entries["libp2p-mesh"].config.discovery, "dht");
@@ -77,7 +122,7 @@ describe("config-io", () => {
 
   it("writeFullConfig creates backup before writing", () => {
     writeFile(configPath, JSON.stringify({ plugins: { entries: {} } }, null, 2));
-    // writeFullConfig(configPath, { discovery: "mdns" })
+    writeFullConfig(configPath, { discovery: "mdns" });
     const bakExists = fs.existsSync(configPath + ".bak");
     assert.equal(bakExists, true);
   });
@@ -85,20 +130,35 @@ describe("config-io", () => {
   it("writeFullConfig rolls back from backup on write failure", () => {
     writeFile(configPath, JSON.stringify({ plugins: { entries: {} } }, null, 2));
     const original = fs.readFileSync(configPath, "utf-8");
-    // Mock write failure by making directory read-only, attempt write
-    // After rollback, file should match original
+
+    // Clean up any previous backup
+    const bakPath = configPath + ".bak";
+    if (fs.existsSync(bakPath)) fs.unlinkSync(bakPath);
+
+    // Make the directory read-only to cause write failure
+    fs.chmodSync(tmpDir, 0o444);
+
+    try {
+      assert.throws(() => {
+        writeFullConfig(configPath, { discovery: "mdns" });
+      });
+    } finally {
+      fs.chmodSync(tmpDir, 0o755);
+    }
+
+    // After rollback attempt, file should match original
     const after = fs.readFileSync(configPath, "utf-8");
     assert.equal(after, original);
   });
 
   it("getNonDefaultConfig returns only keys that differ from defaults", () => {
-    // With default { discovery: "mdns", meshTopic: "openclaw-mesh" }
-    // Config { discovery: "bootstrap", meshTopic: "openclaw-mesh" }
-    // Should return only { discovery: "bootstrap" }
+    const result = getNonDefaultConfig({ discovery: "bootstrap", meshTopic: "openclaw-mesh" });
+    assert.deepEqual(result, { discovery: "bootstrap" });
   });
 
   it("getNonDefaultConfig returns empty object when all keys are defaults", () => {
-    // All-default config → empty {}
+    const result = getNonDefaultConfig({ discovery: "mdns", meshTopic: "openclaw-mesh" });
+    assert.deepEqual(result, {});
   });
 
   it("getDefaultConfig returns full defaults map", () => {
@@ -106,6 +166,7 @@ describe("config-io", () => {
     assert.equal(defaults.discovery, "mdns");
     assert.equal(defaults.meshTopic, "openclaw-mesh");
     assert.equal(defaults.enableNATTraversal, true);
-    assert.equal(defaults.listenAddrs.length, 1);
+    assert.equal(Array.isArray(defaults.listenAddrs), true);
+    assert.equal((defaults.listenAddrs as string[]).length, 1);
   });
 });
