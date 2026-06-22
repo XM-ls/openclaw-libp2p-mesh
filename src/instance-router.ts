@@ -152,6 +152,7 @@ export function createInstanceRouter(options: {
   const pendingAcks = new Map<string, PendingAck>();
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
   const inboundTimeoutControllers = new Set<InboundTimeoutController>();
+  const activeAckSends = new Set<Promise<void>>();
   const unsubs: Array<() => void> = [];
   let stopped = false;
 
@@ -249,12 +250,22 @@ export function createInstanceRouter(options: {
   }
 
   async function sendAck(peerId: string, ack: DeliveryAckPayload): Promise<void> {
-    await mesh.sendStructuredMessage(peerId, {
+    if (stopped) {
+      return;
+    }
+
+    const send = mesh.sendStructuredMessage(peerId, {
       id: crypto.randomUUID(),
       type: "delivery-ack",
       to: peerId,
       payload: JSON.stringify(ack),
     });
+    activeAckSends.add(send);
+    try {
+      await send;
+    } finally {
+      activeAckSends.delete(send);
+    }
   }
 
   function deliveryCacheKey(payload: UserMessagePayload, msg: P2PMessage): string {
@@ -640,6 +651,9 @@ export function createInstanceRouter(options: {
     }
     pendingAcks.clear();
     deliveryCache.clear();
+
+    await Promise.allSettled([...activeAckSends]);
+    activeAckSends.clear();
   }
 
   async function listInstances() {

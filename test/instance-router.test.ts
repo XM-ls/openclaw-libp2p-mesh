@@ -841,6 +841,60 @@ test("stop prevents pending inbound handler from sending ACK after delivery reso
   assert.equal(sent.filter((entry) => entry.message.type === "delivery-ack").length, 0);
 });
 
+test("stop waits for active inbound ACK send before returning", async () => {
+  const sent: SentMessage[] = [];
+  let ackSendStarted = false;
+  let ackSendCompleted = false;
+  let releaseAckSend!: () => void;
+  const ackSendBlocked = new Promise<void>((resolve) => {
+    releaseAckSend = resolve;
+  });
+  const mesh: MeshNetwork = {
+    ...makeMesh(sent),
+    async sendStructuredMessage(peerId, message) {
+      sent.push({ peerId, message });
+      if (message.type === "delivery-ack") {
+        ackSendStarted = true;
+        await ackSendBlocked;
+        ackSendCompleted = true;
+      }
+    },
+  };
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh,
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const handler = router.handleMessage(makeUserMessage("stop-waits-active-ack-send"));
+  await waitFor(() => ackSendStarted, "expected delivery ACK send to start");
+
+  let stopSettled = false;
+  const stopPromise = router.stop().then(() => {
+    stopSettled = true;
+  });
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.equal(stopSettled, false);
+  assert.equal(ackSendCompleted, false);
+
+  releaseAckSend();
+  await stopPromise;
+  await handler;
+
+  assert.equal(ackSendCompleted, true);
+});
+
 test("stop during route resolve prevents inbound delivery and ACK", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
