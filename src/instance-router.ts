@@ -57,21 +57,39 @@ type EffectiveInboundTarget = {
   error?: string;
 };
 
-function displayTargetId(target: { id?: string; channel?: string; target?: string }): string | undefined {
-  return target.id?.trim() || undefined;
+const INVALID_INBOUND_TARGET_ERROR = "inbound target channel and target are required";
+
+function invalidInboundTarget(): EffectiveInboundTarget {
+  return {
+    channel: "",
+    target: "",
+    valid: false,
+    error: INVALID_INBOUND_TARGET_ERROR,
+  };
 }
 
-function normalizeConfiguredTarget(target: InboundTargetConfig): EffectiveInboundTarget {
-  const channel = typeof target.channel === "string" ? target.channel.trim() : "";
-  const destination = typeof target.target === "string" ? target.target.trim() : "";
+function displayTargetId(target: { id?: unknown }): string | undefined {
+  return typeof target.id === "string" ? target.id.trim() || undefined : undefined;
+}
+
+function normalizeConfiguredTarget(target: unknown): EffectiveInboundTarget {
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    return invalidInboundTarget();
+  }
+
+  const configuredTarget = target as Partial<InboundTargetConfig>;
+  const channel =
+    typeof configuredTarget.channel === "string" ? configuredTarget.channel.trim() : "";
+  const destination =
+    typeof configuredTarget.target === "string" ? configuredTarget.target.trim() : "";
   const normalized: EffectiveInboundTarget = {
-    id: displayTargetId(target),
+    id: displayTargetId(configuredTarget),
     channel,
     target: destination,
     valid: Boolean(channel && destination),
   };
   if (!normalized.valid) {
-    normalized.error = "inbound target channel and target are required";
+    normalized.error = INVALID_INBOUND_TARGET_ERROR;
   }
   return normalized;
 }

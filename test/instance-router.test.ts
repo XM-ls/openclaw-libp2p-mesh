@@ -7,6 +7,7 @@ import type {
   InboundDeliveryRequest,
   InstancePeerRecord,
   InstancePeerStore,
+  MeshConfig,
   MeshNetwork,
   P2PMessage,
 } from "../src/types.js";
@@ -252,6 +253,66 @@ test("empty inboundTargets disables fallback and returns unconfigured failure", 
   assert.deepEqual(ack.results, []);
   assert.equal(ack.inboundChannel, undefined);
   assert.equal(ack.inboundTarget, undefined);
+});
+
+test("malformed inbound target records failure and continues to later targets", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const config = {
+    inboundTargets: [
+      null,
+      { id: "telegram-main", channel: " telegram ", target: " chat:123456 " },
+    ],
+  } as unknown as MeshConfig;
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config,
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.channel, "telegram");
+  assert.equal(deliveries[0]?.target, "chat:123456");
+
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, true);
+  assert.equal(ack.error, undefined);
+  assert.deepEqual(
+    ack.results?.map(
+      (result: { id?: string; channel: string; target: string; ok: boolean; error?: string }) => ({
+        id: result.id,
+        channel: result.channel,
+        target: result.target,
+        ok: result.ok,
+        error: result.error,
+      }),
+    ),
+    [
+      {
+        id: undefined,
+        channel: "",
+        target: "",
+        ok: false,
+        error: "inbound target channel and target are required",
+      },
+      {
+        id: "telegram-main",
+        channel: "telegram",
+        target: "chat:123456",
+        ok: true,
+        error: undefined,
+      },
+    ],
+  );
 });
 
 test("multi-target config types compile", () => {
