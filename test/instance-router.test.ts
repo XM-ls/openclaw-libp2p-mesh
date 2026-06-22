@@ -1243,3 +1243,79 @@ test("hard-cap failure ACK is cached as terminal result for retries", async () =
   assert.equal(overflowAcks.length, 2);
   assert.deepEqual(overflowAcks[1], firstOverflowAck);
 });
+
+test("timed-out inbound deliveries count against cap until adapter settles", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseDelivery!: () => void;
+  const deliveryBlocked = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      await deliveryBlocked;
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 1,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  // Mirrors the production MAX_DELIVERY_CACHE_ENTRIES cap.
+  const maxPending = 1000;
+  const messages = Array.from({ length: maxPending }, (_, index) =>
+    makeUserMessage(`timed-out-pending-message-${index}`),
+  );
+  await Promise.all(messages.map((message) => router.handleMessage(message)));
+  await waitFor(
+    () => deliveries.length === maxPending,
+    "expected all timed-out deliveries to start",
+  );
+
+  const duplicateMessage = messages[0]!;
+  await router.handleMessage(duplicateMessage);
+
+  assert.equal(deliveries.length, maxPending);
+  const duplicateAcks = sent
+    .filter((entry) => entry.message.type === "delivery-ack")
+    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+    .filter((ack) => ack.ackFor === duplicateMessage.id);
+  assert.equal(duplicateAcks.length, 2);
+  assert.deepEqual(duplicateAcks[1], duplicateAcks[0]);
+
+  const overflowMessage = makeUserMessage("timed-out-overflow-message");
+  await router.handleMessage(overflowMessage);
+
+  assert.equal(deliveries.length, maxPending);
+  const overflowAck = sent
+    .filter((entry) => entry.message.type === "delivery-ack")
+    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+    .find((ack) => ack.ackFor === overflowMessage.id);
+  assert.ok(overflowAck, "expected over-cap message to receive an ACK");
+  assert.equal(overflowAck.ok, false);
+  assert.equal(overflowAck.error, "too many pending inbound deliveries (1000)");
+  assert.deepEqual(overflowAck.results, []);
+
+  releaseDelivery();
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+
+  const afterSettleMessage = makeUserMessage("timed-out-after-settle-message");
+  await router.handleMessage(afterSettleMessage);
+
+  assert.equal(deliveries.length, maxPending + 1);
+  const afterSettleAck = sent
+    .filter((entry) => entry.message.type === "delivery-ack")
+    .map((entry) => JSON.parse(entry.message.payload) as ApiDeliveryAckPayload)
+    .find((ack) => ack.ackFor === afterSettleMessage.id);
+  assert.ok(afterSettleAck, "expected post-settle message to receive an ACK");
+  assert.equal(afterSettleAck.ok, true);
+});

@@ -26,6 +26,7 @@ type PendingAck = {
 };
 
 type DeliveryCacheEntry = {
+  inFlight?: boolean;
   payload?: DeliveryAckPayload;
   promise?: Promise<DeliveryAckPayload>;
 };
@@ -516,7 +517,7 @@ export function createInstanceRouter(options: {
         results: [],
       };
       deliveryCache.set(cacheKey, { payload: ack });
-      trimDeliveryCache();
+      trimDeliveryCache(cacheKey);
       if (stopped) {
         return;
       }
@@ -528,18 +529,23 @@ export function createInstanceRouter(options: {
       timedOut: false,
       results: [],
     };
-    const ackPromise = withInboundDeliveryTimeout(
-      Promise.resolve().then(() => deliverAndBuildAck(payload, msg, deliveryState)),
-      payload.messageId,
-      deliveryState,
-    );
-    deliveryCache.set(cacheKey, { promise: ackPromise });
+    const deliveryPromise = Promise.resolve()
+      .then(() => deliverAndBuildAck(payload, msg, deliveryState))
+      .finally(() => {
+        const entry = deliveryCache.get(cacheKey);
+        if (entry) {
+          entry.inFlight = false;
+        }
+      });
+    const ackPromise = withInboundDeliveryTimeout(deliveryPromise, payload.messageId, deliveryState);
+    const cacheEntry: DeliveryCacheEntry = { inFlight: true, promise: ackPromise };
+    deliveryCache.set(cacheKey, cacheEntry);
     trimDeliveryCache();
     const ack = await ackPromise;
     if (stopped) {
       return;
     }
-    deliveryCache.set(cacheKey, { payload: ack });
+    cacheEntry.payload = ack;
     trimDeliveryCache();
     if (stopped) {
       return;
@@ -550,17 +556,17 @@ export function createInstanceRouter(options: {
   function pendingDeliveryCount(): number {
     let count = 0;
     for (const entry of deliveryCache.values()) {
-      if (entry.promise && !entry.payload) count += 1;
+      if (entry.inFlight) count += 1;
     }
     return count;
   }
 
-  function trimDeliveryCache(): void {
+  function trimDeliveryCache(protectedKey?: string): void {
     while (deliveryCache.size > MAX_DELIVERY_CACHE_ENTRIES) {
       const settledKeys = Array.from(deliveryCache)
-        .filter(([, entry]) => entry.payload)
+        .filter(([key, entry]) => key !== protectedKey && entry.payload && !entry.inFlight)
         .map(([key]) => key);
-      if (settledKeys.length <= 1) return;
+      if (settledKeys.length === 0) return;
       deliveryCache.delete(settledKeys[0]!);
     }
   }
