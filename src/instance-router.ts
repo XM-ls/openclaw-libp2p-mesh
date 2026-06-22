@@ -27,7 +27,8 @@ type PendingAck = {
 
 type DeliveryCacheEntry = {
   peerId: string;
-  payload: DeliveryAckPayload;
+  payload?: DeliveryAckPayload;
+  promise?: Promise<DeliveryAckPayload>;
 };
 
 const MAX_DELIVERY_CACHE_ENTRIES = 1000;
@@ -227,6 +228,82 @@ export function createInstanceRouter(options: {
     });
   }
 
+  async function deliverAndBuildAck(
+    payload: UserMessagePayload,
+    msg: P2PMessage,
+  ): Promise<DeliveryAckPayload> {
+    const targets = effectiveInboundTargets(config);
+    if (targets.length === 0) {
+      return {
+        ackFor: payload.messageId,
+        ok: false,
+        deliveredAt: Date.now(),
+        error: "inbound delivery is not configured",
+        results: [],
+      };
+    }
+
+    const metadata = payload.metadata;
+    const results: DeliveryTargetResult[] = [];
+    for (const target of targets) {
+      if (!target.valid) {
+        results.push({
+          id: target.id,
+          channel: target.channel,
+          target: target.target,
+          ok: false,
+          error: target.error ?? "inbound target channel and target are required",
+        });
+        continue;
+      }
+
+      try {
+        const result = await delivery.deliver({
+          channel: target.channel,
+          target: target.target,
+          text: payload.text,
+          metadata: {
+            fromInstanceId: payload.fromInstanceId,
+            fromPeerId: msg.from,
+            p2pMessageId: payload.messageId,
+            allowAgentAutoReply: metadata?.allowAgentAutoReply === true,
+            replyToInstanceId: payload.fromInstanceId,
+            replyTool: "p2p_send_instance_message",
+          },
+        });
+        results.push({
+          id: target.id,
+          channel: result.channel,
+          target: result.target,
+          ok: result.ok,
+          error: result.error,
+        });
+      } catch (error) {
+        results.push({
+          id: target.id,
+          channel: target.channel,
+          target: target.target,
+          ok: false,
+          error: summarizeError(error),
+        });
+      }
+    }
+
+    const selected = firstAttemptedResult(results);
+    return {
+      ackFor: payload.messageId,
+      ok: results.some((result) => result.ok),
+      inboundChannel: selected?.channel,
+      inboundTarget: selected?.target,
+      deliveredAt: Date.now(),
+      error: results.every((result) => !result.ok)
+        ? results.map((result) => result.error).filter(Boolean).join("; ") ||
+          "inbound delivery failed"
+        : undefined,
+      results,
+    };
+  }
+
   async function handleUserMessage(msg: P2PMessage): Promise<void> {
     const payload = parsePayload<UserMessagePayload>(msg);
     if (
@@ -263,74 +340,18 @@ export function createInstanceRouter(options: {
 
     const cached = deliveryCache.get(payload.messageId);
     if (cached) {
-      await sendAck(cached.peerId, cached.payload);
+      const ack = cached.payload ?? (await cached.promise);
+      if (!ack) {
+        throw new Error(`delivery cache entry for ${payload.messageId} has no ACK payload`);
+      }
+      await sendAck(cached.peerId, ack);
       return;
     }
 
-    let ack: DeliveryAckPayload;
-    const targets = effectiveInboundTargets(config);
-    if (targets.length === 0) {
-      ack = {
-        ackFor: payload.messageId,
-        ok: false,
-        inboundChannel: config.inboundChannel,
-        inboundTarget: config.inboundTarget,
-        deliveredAt: Date.now(),
-        error: "inbound delivery is not configured",
-        results: [],
-      };
-    } else {
-      const metadata = payload.metadata;
-      const results: DeliveryTargetResult[] = [];
-      for (const target of targets) {
-        if (!target.valid) {
-          results.push({
-            id: target.id,
-            channel: target.channel,
-            target: target.target,
-            ok: false,
-            error: target.error ?? "inbound target channel and target are required",
-          });
-          continue;
-        }
-
-        const result = await delivery.deliver({
-          channel: target.channel,
-          target: target.target,
-          text: payload.text,
-          metadata: {
-            fromInstanceId: payload.fromInstanceId,
-            fromPeerId: msg.from,
-            p2pMessageId: payload.messageId,
-            allowAgentAutoReply: metadata?.allowAgentAutoReply === true,
-            replyToInstanceId: payload.fromInstanceId,
-            replyTool: "p2p_send_instance_message",
-          },
-        });
-        results.push({
-          id: target.id,
-          channel: result.channel,
-          target: result.target,
-          ok: result.ok,
-          error: result.error,
-        });
-      }
-
-      const selected = firstAttemptedResult(results);
-      ack = {
-        ackFor: payload.messageId,
-        ok: results.some((result) => result.ok),
-        inboundChannel: selected?.channel,
-        inboundTarget: selected?.target,
-        deliveredAt: Date.now(),
-        error: results.every((result) => !result.ok)
-          ? results.map((result) => result.error).filter(Boolean).join("; ") ||
-            "inbound delivery failed"
-          : undefined,
-        results,
-      };
-    }
-
+    const ackPromise = Promise.resolve().then(() => deliverAndBuildAck(payload, msg));
+    deliveryCache.set(payload.messageId, { peerId: msg.from, promise: ackPromise });
+    trimDeliveryCache();
+    const ack = await ackPromise;
     deliveryCache.set(payload.messageId, { peerId: msg.from, payload: ack });
     trimDeliveryCache();
     await sendAck(msg.from, ack);

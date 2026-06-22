@@ -250,6 +250,8 @@ test("empty inboundTargets disables fallback and returns unconfigured failure", 
   assert.equal(ack.ok, false);
   assert.equal(ack.error, "inbound delivery is not configured");
   assert.deepEqual(ack.results, []);
+  assert.equal(ack.inboundChannel, undefined);
+  assert.equal(ack.inboundTarget, undefined);
 });
 
 test("multi-target config types compile", () => {
@@ -362,6 +364,7 @@ test("all target failures return ok false with all errors", async () => {
   assert.equal(ack.ok, false);
   assert.equal(ack.inboundChannel, "feishu");
   assert.equal(ack.inboundTarget, "user:ou_xxx");
+  assert.equal(ack.error, "feishu unavailable; telegram unavailable");
   assert.deepEqual(
     ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
       id: result.id,
@@ -371,6 +374,46 @@ test("all target failures return ok false with all errors", async () => {
     [
       { id: "feishu-main", ok: false, error: "feishu unavailable" },
       { id: "telegram-main", ok: false, error: "telegram unavailable" },
+    ],
+  );
+});
+
+test("thrown target delivery error is reported while later targets still deliver", async () => {
+  const sent: SentMessage[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      if (request.channel === "feishu") {
+        throw new Error("feishu exploded");
+      }
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, true);
+  assert.equal(ack.error, undefined);
+  assert.deepEqual(
+    ack.results?.map((result: { id?: string; ok: boolean; error?: string }) => ({
+      id: result.id,
+      ok: result.ok,
+      error: result.error,
+    })),
+    [
+      { id: "feishu-main", ok: false, error: "feishu exploded" },
+      { id: "telegram-main", ok: true, error: undefined },
     ],
   );
 });
@@ -396,6 +439,46 @@ test("duplicate messageId reuses cached ACK without repeat delivery", async () =
   const message = makeUserMessage("duplicate-message");
   await router.handleMessage(message);
   await router.handleMessage(message);
+
+  assert.equal(deliveries.length, 1);
+  const acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 2);
+  assert.deepEqual(JSON.parse(acks[0]!.message.payload), JSON.parse(acks[1]!.message.payload));
+});
+
+test("concurrent duplicate messageId waits for in-flight ACK without repeat delivery", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  let releaseDelivery!: () => void;
+  const deliveryBlocked = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      await deliveryBlocked;
+      return { ok: true, channel: request.channel, target: request.target };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const message = makeUserMessage("concurrent-duplicate-message");
+  const first = router.handleMessage(message);
+  const second = router.handleMessage(message);
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.equal(deliveries.length, 1);
+  releaseDelivery();
+  await Promise.all([first, second]);
 
   assert.equal(deliveries.length, 1);
   const acks = sent.filter((entry) => entry.message.type === "delivery-ack");
