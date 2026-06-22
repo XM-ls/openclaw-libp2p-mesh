@@ -322,6 +322,46 @@ export function createInstanceRouter(options: {
     };
   }
 
+  function withInboundDeliveryTimeout(
+    promise: Promise<DeliveryAckPayload>,
+    messageId: string,
+  ): Promise<DeliveryAckPayload> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve({
+          ackFor: messageId,
+          ok: false,
+          deliveredAt: Date.now(),
+          error: `inbound delivery timeout after ${ackTimeoutMs}ms`,
+          results: [],
+        });
+      }, ackTimeoutMs);
+
+      promise
+        .then((ack) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(ack);
+        })
+        .catch((error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve({
+            ackFor: messageId,
+            ok: false,
+            deliveredAt: Date.now(),
+            error: summarizeError(error),
+            results: [],
+          });
+        });
+    });
+  }
+
   async function handleUserMessage(msg: P2PMessage): Promise<void> {
     const payload = parsePayload<UserMessagePayload>(msg);
     if (
@@ -366,7 +406,10 @@ export function createInstanceRouter(options: {
       return;
     }
 
-    const ackPromise = Promise.resolve().then(() => deliverAndBuildAck(payload, msg));
+    const ackPromise = withInboundDeliveryTimeout(
+      Promise.resolve().then(() => deliverAndBuildAck(payload, msg)),
+      payload.messageId,
+    );
     deliveryCache.set(payload.messageId, { peerId: msg.from, promise: ackPromise });
     trimDeliveryCache();
     const ack = await ackPromise;

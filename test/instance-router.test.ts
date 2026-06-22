@@ -146,6 +146,22 @@ function parseAck(sent: SentMessage[]): ApiDeliveryAckPayload {
   return JSON.parse(ackMessage.message.payload) as ApiDeliveryAckPayload;
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 2000,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(message);
+    }
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+}
+
 test("legacy single-target config still delivers once", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
@@ -556,6 +572,44 @@ test("concurrent duplicate messageId waits for in-flight ACK without repeat deli
   assert.deepEqual(JSON.parse(acks[0]!.message.payload), JSON.parse(acks[1]!.message.payload));
 });
 
+test("stalled inbound delivery resolves with timeout ACK and caches result", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return new Promise(() => {});
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("sender@def.456", "peer-sender")]),
+    delivery,
+    config: {
+      deliveryAckTimeoutMs: 20,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    },
+  });
+
+  const message = makeUserMessage("stalled-inbound-delivery");
+  await router.handleMessage(message);
+
+  assert.equal(deliveries.length, 1);
+  let acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 1);
+  const timeoutAck = JSON.parse(acks[0]!.message.payload) as ApiDeliveryAckPayload;
+  assert.equal(timeoutAck.ok, false);
+  assert.deepEqual(timeoutAck.results, []);
+  assert.equal(timeoutAck.error, "inbound delivery timeout after 20ms");
+
+  await router.handleMessage(message);
+
+  assert.equal(deliveries.length, 1);
+  acks = sent.filter((entry) => entry.message.type === "delivery-ack");
+  assert.equal(acks.length, 2);
+  assert.deepEqual(JSON.parse(acks[1]!.message.payload), timeoutAck);
+});
+
 test("pending delivery cache entries are not evicted before in-flight duplicate", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
@@ -583,11 +637,7 @@ test("pending delivery cache entries are not evicted before in-flight duplicate"
     makeUserMessage(`pending-message-${index}`),
   );
   const handlers = messages.map((message) => router.handleMessage(message));
-  while (deliveries.length < 1001) {
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
-  }
+  await waitFor(() => deliveries.length === 1001, "expected all pending deliveries to start");
 
   const duplicate = router.handleMessage(messages[0]!);
   await new Promise<void>((resolve) => {
