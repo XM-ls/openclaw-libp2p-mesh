@@ -10,6 +10,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 - **Bootstrap Mode** — Optional static bootstrap peer list for non-LAN scenarios
 - **WebSocket Transport** — Optional WebSocket support for NAT/firewall-friendly connections
 - **NAT Traversal** — Built-in AutoNAT + UPnP + Circuit Relay v2 + DCUtR for peers behind home routers / firewalls
+- **User Public Attributes** — Announce public tags and structured profile attributes so agents can dry-run and send to locally discovered instances by attribute
 
 ## Requirements
 
@@ -442,6 +443,129 @@ p2p_send_instance_message({ "instanceId": "<target-instance-id>", "message": "�
 The sender reports success only after the remote OpenClaw instance forwards the message to its configured inbound channel and returns a delivery ACK.
 
 Tools are not configured in `openclaw.json`; they are registered automatically by the plugin through `api.registerTool()`.
+
+### User public attributes
+
+`libp2p-mesh` can announce user public attributes with instance route announcements. These attributes help agents find matching OpenClaw instances after those instances have already been discovered through the mesh.
+
+There are two sources:
+
+- `USER.md` tags are extracted read-only at gateway startup. The plugin never edits `USER.md`.
+- `user-profile.json` stores manually managed structured attributes such as group, project, role, skill, or a custom key.
+
+Run the profile wizard to manage structured attributes:
+
+```bash
+openclaw libp2p-mesh profile
+```
+
+The wizard previews read-only `USER.md` tags and lets you add, edit, or remove only structured profile attributes. Tags extracted from `USER.md` are not written to `user-profile.json`; they are merged in memory with profile attributes and broadcast only in instance announce messages.
+
+The default profile path is:
+
+```text
+~/.openclaw/libp2p/user-profile.json
+```
+
+When `OPENCLAW_STATE_DIR` is set:
+
+```text
+$OPENCLAW_STATE_DIR/libp2p/user-profile.json
+```
+
+Example `user-profile.json`:
+
+```json
+{
+  "version": 1,
+  "updatedAt": 1782180000000,
+  "attributes": [
+    {
+      "kind": "structured",
+      "key": "project",
+      "value": "openclaw",
+      "label": "project: openclaw",
+      "source": "profile"
+    },
+    {
+      "kind": "structured",
+      "key": "role",
+      "value": "maintainer",
+      "label": "role: maintainer",
+      "source": "profile"
+    }
+  ]
+}
+```
+
+Remote attributes are cached in plugin-managed instance state under `instance-peer.json.userPublicAttributes`:
+
+```json
+{
+  "version": 1,
+  "updatedAt": 1782180000000,
+  "instances": {
+    "alice-mac@AQIDBAUGBweI.7a3f9e2b": {
+      "instanceId": "alice-mac@AQIDBAUGBweI.7a3f9e2b",
+      "peerId": "12D3KooW...",
+      "instanceName": "alice-mac",
+      "multiaddrs": ["/ip4/192.168.1.23/tcp/4001"],
+      "userPublicAttributes": [
+        {
+          "kind": "tag",
+          "value": "libp2p",
+          "label": "libp2p",
+          "source": "USER.md"
+        },
+        {
+          "kind": "structured",
+          "key": "project",
+          "value": "openclaw",
+          "label": "project: openclaw",
+          "source": "profile"
+        }
+      ],
+      "lastSeenAt": 1782180000000,
+      "lastAnnouncedAt": 1782180000000,
+      "source": "announce"
+    }
+  }
+}
+```
+
+Use `p2p_send_user_attribute_message` for attribute-based group messages. Always dry-run first, review the matched instances with the user, then send only after confirmation:
+
+```text
+p2p_send_user_attribute_message({
+  "match": { "kind": "structured", "key": "project", "value": "openclaw" },
+  "message": "今晚同步一下进展",
+  "dryRun": true
+})
+```
+
+After confirming the dry-run targets:
+
+```text
+p2p_send_user_attribute_message({
+  "match": { "kind": "structured", "key": "project", "value": "openclaw" },
+  "message": "今晚同步一下进展",
+  "dryRun": false
+})
+```
+
+Tag matches use only the tag value:
+
+```text
+p2p_send_user_attribute_message({
+  "match": { "kind": "tag", "value": "libp2p" },
+  "message": "libp2p 方向有个问题想确认",
+  "dryRun": true
+})
+```
+
+The first version matches only instances already present in the local `instance-peer.json` discovery cache. It does not search the whole network or ask disconnected peers for more users.
+
+Privacy boundary: public attributes are broadcast with instance announce messages to peers your gateway connects to. Do not put private, sensitive, or access-controlled information in `USER.md` tags or `user-profile.json` structured attributes.
 
 ## Troubleshooting
 
