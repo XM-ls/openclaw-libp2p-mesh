@@ -543,6 +543,8 @@ export function createInstanceRouter(options: {
       toPeerId: route.peerId,
       ackMessageId: ack.ackFor,
       inboundChannel: ack.inboundChannel,
+      inboundTarget: ack.inboundTarget,
+      deliveryResults: ack.results,
       error: ack.error,
     };
   }

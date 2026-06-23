@@ -156,6 +156,61 @@ function parseAcks(sent: SentMessage[]) {
     .map((item) => JSON.parse(item.message.payload));
 }
 
+test("sendInstanceMessage returns ACK target results to tool layer", async () => {
+  const sent: SentMessage[] = [];
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("receiver@abc.123", "peer-receiver")]),
+    config: {
+      deliveryAckTimeoutMs: 1000,
+    },
+  });
+
+  const pending = router.sendInstanceMessage("receiver@abc.123", "今晚来吃饭");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const userMessage = sent.find((item) => item.message.type === "user-message");
+  assert.ok(userMessage, "expected user message to be sent");
+  const deliveryResults = [
+    {
+      id: "feishu-primary",
+      channel: "feishu",
+      target: "user:ou_xxx",
+      ok: true,
+    },
+    {
+      id: "telegram-alerts",
+      channel: "telegram",
+      target: "chat:123",
+      ok: false,
+      error: "telegram failed",
+    },
+  ];
+
+  await router.handleMessage({
+    id: "ack-1",
+    type: "delivery-ack",
+    from: "peer-receiver",
+    to: "local-peer",
+    timestamp: 1,
+    instanceId: "receiver@abc.123",
+    payload: JSON.stringify({
+      ackFor: userMessage.message.id,
+      ok: true,
+      inboundChannel: "feishu",
+      inboundTarget: "user:ou_xxx",
+      deliveredAt: 1,
+      results: deliveryResults,
+    }),
+  });
+
+  const result = await pending;
+
+  assert.equal(result.delivered, true);
+  assert.equal(result.inboundChannel, "feishu");
+  assert.equal(result.inboundTarget, "user:ou_xxx");
+  assert.deepEqual(result.deliveryResults, deliveryResults);
+});
+
 test("legacy single-target config still delivers once", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
