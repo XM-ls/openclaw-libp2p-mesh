@@ -150,6 +150,10 @@ git commit -m "feat: add user public attribute helpers"
 
 ## 任务 2: user-profile.json 存储
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `0031945` `feat: add user profile store`
+
 **Harness（测试框架）:**
 
 - **范围：** 实现 `user-profile.json` 的路径解析、读取、写入、损坏备份、结构化属性增删改。不读取 USER.md、不广播、不注册 CLI。
