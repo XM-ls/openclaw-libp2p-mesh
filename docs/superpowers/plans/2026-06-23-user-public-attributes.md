@@ -46,6 +46,10 @@
 
 ## 任务 1: 用户公开属性类型与纯函数
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `cf3c0b2` `feat: add user public attribute helpers`
+
 **Harness（测试框架）:**
 
 - **范围：** 定义用户公开属性类型和纯函数；实现规范化、校验、去重、合并和匹配。不读写文件、不接 router、不注册 CLI。
