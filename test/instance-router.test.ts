@@ -280,6 +280,46 @@ test("empty inboundTargets disables fallback and returns unconfigured failure", 
   assert.deepEqual(ack.results, []);
 });
 
+test("invalid-only inboundTargets omit ack target fields", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return {
+        ok: true,
+        channel: request.channel,
+        target: request.target,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("remote-instance", "remote-peer")]),
+    delivery,
+    config: {
+      inboundTargets: [{ id: "bad", channel: "", target: "" }],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  assert.equal(deliveries.length, 0);
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, false);
+  assert.equal(ack.inboundChannel, undefined);
+  assert.equal(ack.inboundTarget, undefined);
+  assert.deepEqual(ack.results, [
+    {
+      id: "bad",
+      channel: "",
+      target: "",
+      ok: false,
+      error: "inbound target channel and target are required",
+    },
+  ]);
+});
+
 test("mixed target results return ok true with every target result", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];

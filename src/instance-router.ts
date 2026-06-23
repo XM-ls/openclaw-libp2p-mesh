@@ -127,7 +127,12 @@ function effectiveInboundTargets(config: MeshConfig): EffectiveInboundTarget[] {
 function firstAttemptedResult(
   results: DeliveryTargetResult[],
 ): DeliveryTargetResult | undefined {
-  return results.find((result) => result.ok) ?? results[0];
+  return (
+    results.find((result) => result.ok) ??
+    results.find(
+      (result) => isNonEmptyString(result.channel) && isNonEmptyString(result.target),
+    )
+  );
 }
 
 export function createInstanceRouter(options: {
