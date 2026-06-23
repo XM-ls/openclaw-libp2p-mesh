@@ -55,7 +55,8 @@ test("loadTags reads USER.md without modifying it or writing profile data", asyn
       "# USER",
       "",
       "Name: Yao",
-      "Notes: Works with 实验室, ResearchLoop, and TypeScript.",
+      "Notes: 我在实验室做项目。",
+      "Skills: ResearchLoop, TypeScript",
     ].join("\n");
     await writeFile(filePath, markdown, "utf8");
     const before = await stat(filePath);
@@ -90,14 +91,27 @@ test("extractUserMdTags does not treat ordinary Chinese notes as public tags", (
   assert.deepEqual(extractUserMdTags("Notes: 今天晚上八点同步一下进展"), []);
 });
 
+test("extractUserMdTags does not expose capitalized words from ordinary English notes", () => {
+  const tags = extractUserMdTags(
+    "Notes: Meeting with Bob about Salary Review and SecretProject tonight.",
+  );
+  const values = tags.map((tag) => tag.value);
+
+  assert.equal(values.includes("Meeting"), false);
+  assert.equal(values.includes("Bob"), false);
+  assert.equal(values.includes("Salary"), false);
+  assert.equal(values.includes("Review"), false);
+  assert.equal(values.includes("SecretProject"), false);
+});
+
 test("extractUserMdTags extracts conservative short tags from natural language", () => {
   const tags = extractUserMdTags([
     "# USER",
     "",
     "Name: Yao",
     "What to call them: Yao",
-    "Notes: 我在实验室做 ResearchLoop，也经常写 TypeScript。",
-    "Context: interested in libp2p mesh and OpenClaw plugins.",
+    "Notes: 我在实验室做项目。",
+    "Projects: ResearchLoop, TypeScript, OpenClaw",
   ].join("\n"));
 
   assert.ok(tags.some((tag) => tag.value === "实验室"));

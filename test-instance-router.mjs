@@ -77,6 +77,17 @@ async function waitForMessage(mesh, predicate) {
   return undefined;
 }
 
+async function waitForMessageCount(mesh, predicate, count) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const messages = mesh.messages.filter(predicate);
+    if (messages.length >= count) {
+      return messages;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return [];
+}
+
 async function run() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-instance-router-"));
   const store = createInstancePeerStore({
@@ -127,7 +138,12 @@ async function run() {
   assert.equal(mesh.messages[0].message.type, "instance-announce");
 
   mesh.emitConnect("peer-b");
-  assert.equal(mesh.messages.filter((m) => m.message.type === "instance-announce").length, 2);
+  const announces = await waitForMessageCount(
+    mesh,
+    (m) => m.message.type === "instance-announce",
+    2,
+  );
+  assert.equal(announces.length, 2);
 
   await router.handleMessage({
     id: "announce-b",
