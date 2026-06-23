@@ -1,6 +1,8 @@
 import type {
   DeliveryAckPayload,
+  DeliveryTargetResult,
   InboundDeliveryAdapter,
+  InboundTargetConfig,
   InstanceAnnouncePayload,
   InstancePeerStore,
   InstanceRouter,
@@ -44,6 +46,88 @@ function isNonEmptyString(value: unknown): value is string {
 
 function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type EffectiveInboundTarget = {
+  id?: string;
+  channel: string;
+  target: string;
+  valid: boolean;
+  error?: string;
+};
+
+function displayTargetId(target: {
+  id?: string;
+  channel?: string;
+  target?: string;
+}): string | undefined {
+  const id = target.id?.trim();
+  return id && id.length > 0 ? id : undefined;
+}
+
+function normalizeConfiguredTarget(target: InboundTargetConfig): EffectiveInboundTarget {
+  const channel = target.channel.trim();
+  const inboundTarget = target.target.trim();
+  const id = displayTargetId(target);
+
+  if (!channel || !inboundTarget) {
+    return {
+      id,
+      channel,
+      target: inboundTarget,
+      valid: false,
+      error: "inbound target channel and target are required",
+    };
+  }
+
+  return {
+    id,
+    channel,
+    target: inboundTarget,
+    valid: true,
+  };
+}
+
+function effectiveInboundTargets(config: MeshConfig): EffectiveInboundTarget[] {
+  if (Array.isArray(config.inboundTargets)) {
+    const seen = new Set<string>();
+    const targets: EffectiveInboundTarget[] = [];
+
+    for (const configuredTarget of config.inboundTargets) {
+      const target = normalizeConfiguredTarget(configuredTarget);
+      if (!target.valid) {
+        targets.push(target);
+        continue;
+      }
+
+      const key = `${target.channel}\0${target.target}`;
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      targets.push(target);
+    }
+
+    return targets;
+  }
+
+  if (config.inboundChannel && config.inboundTarget) {
+    return [
+      normalizeConfiguredTarget({
+        channel: config.inboundChannel,
+        target: config.inboundTarget,
+      }),
+    ];
+  }
+
+  return [];
+}
+
+function firstAttemptedResult(
+  results: DeliveryTargetResult[],
+): DeliveryTargetResult | undefined {
+  return results.find((result) => result.ok) ?? results[0];
 }
 
 export function createInstanceRouter(options: {
@@ -204,21 +288,26 @@ export function createInstanceRouter(options: {
       return;
     }
 
+    const targets = effectiveInboundTargets(config);
+    const validTargets = targets.filter((target) => target.valid);
+
     let ack: DeliveryAckPayload;
-    if (!config.inboundChannel || !config.inboundTarget) {
+    if (validTargets.length === 0) {
       ack = {
         ackFor: payload.messageId,
         ok: false,
-        inboundChannel: config.inboundChannel,
-        inboundTarget: config.inboundTarget,
         deliveredAt: Date.now(),
         error: "inbound delivery is not configured",
       };
+      if (Array.isArray(config.inboundTargets)) {
+        ack.results = [];
+      }
     } else {
+      const target = validTargets[0];
       const metadata = payload.metadata;
       const result = await delivery.deliver({
-        channel: config.inboundChannel,
-        target: config.inboundTarget,
+        channel: target.channel,
+        target: target.target,
         text: payload.text,
         metadata: {
           fromInstanceId: payload.fromInstanceId,
@@ -229,13 +318,22 @@ export function createInstanceRouter(options: {
           replyTool: "p2p_send_instance_message",
         },
       });
+      const attempted = firstAttemptedResult([
+        {
+          id: target.id,
+          channel: result.channel,
+          target: result.target,
+          ok: result.ok,
+          error: result.error,
+        },
+      ]);
       ack = {
         ackFor: payload.messageId,
-        ok: result.ok,
-        inboundChannel: result.channel,
-        inboundTarget: result.target,
+        ok: attempted?.ok ?? false,
+        inboundChannel: attempted?.channel,
+        inboundTarget: attempted?.target,
         deliveredAt: Date.now(),
-        error: result.error,
+        error: attempted?.error,
       };
     }
 
