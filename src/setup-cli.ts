@@ -16,7 +16,18 @@ const SETUP_CLI_AFTER_WRITE = {
   reason: "libp2p-mesh setup completed; restart manually to apply gateway changes.",
 } as const;
 
-type ClosableSetupPrompter = SetupPrompter & {
+export const LIBP2P_MESH_CLI_REGISTRATION = {
+  commands: ["libp2p-mesh"],
+  descriptors: [
+    {
+      name: "libp2p-mesh",
+      description: "Configure libp2p-mesh plugin.",
+      hasSubcommands: true,
+    },
+  ],
+};
+
+export type ClosableSetupPrompter = SetupPrompter & {
   close?: () => void;
 };
 
@@ -32,35 +43,35 @@ export function registerLibp2pMeshSetupCli(api: OpenClawPluginApi, deps: SetupCl
         .command("libp2p-mesh")
         .description("Configure libp2p-mesh plugin.");
 
-      root
-        .command("setup")
-        .description("Run the libp2p-mesh setup wizard.")
-        .action(async () => {
-          const prompter = (deps.createPrompter?.(ctx) ?? createReadlinePrompter()) as ClosableSetupPrompter;
-          const writer = deps.createWriter?.(api) ?? createOpenClawConfigWriter(api);
-          try {
-            const result = await runSetupWizard({
-              currentConfig: ctx.config as OpenClawConfigLike,
-              prompter,
-              writer,
-            });
-            prompter.print(result.message);
-          } finally {
-            prompter.close?.();
-          }
-        });
+      registerLibp2pMeshSetupCommand(root, api, ctx, deps);
     },
-    {
-      commands: ["libp2p-mesh"],
-      descriptors: [
-        {
-          name: "libp2p-mesh",
-          description: "Configure libp2p-mesh plugin.",
-          hasSubcommands: true,
-        },
-      ],
-    },
+    LIBP2P_MESH_CLI_REGISTRATION,
   );
+}
+
+export function registerLibp2pMeshSetupCommand(
+  root: { command(name: string): { description(text: string): { action(handler: () => Promise<void>): void } } },
+  api: OpenClawPluginApi,
+  ctx: OpenClawPluginCliContext,
+  deps: SetupCliDeps = {},
+): void {
+  root
+    .command("setup")
+    .description("Run the libp2p-mesh setup wizard.")
+    .action(async () => {
+      const prompter = (deps.createPrompter?.(ctx) ?? createReadlinePrompter()) as ClosableSetupPrompter;
+      const writer = deps.createWriter?.(api) ?? createOpenClawConfigWriter(api);
+      try {
+        const result = await runSetupWizard({
+          currentConfig: ctx.config as OpenClawConfigLike,
+          prompter,
+          writer,
+        });
+        prompter.print(result.message);
+      } finally {
+        prompter.close?.();
+      }
+    });
 }
 
 function createOpenClawConfigWriter(api: OpenClawPluginApi): SetupConfigWriter {
@@ -83,7 +94,7 @@ function replaceConfig(draft: OpenClawConfig, nextConfig: OpenClawConfig): void 
   Object.assign(draft, structuredClone(nextConfig));
 }
 
-function createReadlinePrompter(): ClosableSetupPrompter {
+export function createReadlinePrompter(): ClosableSetupPrompter {
   const readline = createInterface({ input, output });
 
   return {

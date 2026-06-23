@@ -8,12 +8,12 @@ import { createMeshNetwork } from "./mesh.js";
 import { createUserMdAttributeSource } from "./user-md-attributes.js";
 import { createUserProfileStore } from "./user-profile-store.js";
 import { buildP2PTools } from "./agent-tools.js";
-import { registerLibp2pMeshSetupCli } from "./setup-cli.js";
+import { registerLibp2pMeshCli } from "./profile-cli.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { MeshConfig } from "./types.js";
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
-  registerLibp2pMeshSetupCli(api);
+  registerLibp2pMeshCli(api);
 
   const config = api.pluginConfig as MeshConfig | undefined;
   let unsubscribeInbound: (() => void) | undefined;
