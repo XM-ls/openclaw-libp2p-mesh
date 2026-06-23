@@ -38,6 +38,10 @@
 
 ## 任务 1: 配置构建基础与网络模式
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `ab95c76` `feat: add setup config network builder`
+
 **Harness（测试框架）:**
 
 - **范围：** 创建 `src/setup-config.ts`，实现插件 entry 创建、默认超时、四种网络模式和网络字段清理。不实现 `inboundTargets` 管理、不实现 CLI 交互、不写配置文件。
