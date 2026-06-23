@@ -86,6 +86,25 @@ export interface DeliveryAckPayload {
   error?: string;
 }
 
+export type UserPublicAttribute =
+  | {
+      kind: "tag";
+      value: string;
+      label: string;
+      source: "USER.md";
+    }
+  | {
+      kind: "structured";
+      key: "group" | "project" | "role" | "skill" | "custom" | string;
+      value: string;
+      label: string;
+      source: "profile";
+    };
+
+export type UserAttributeMatch =
+  | { kind: "tag"; value: string }
+  | { kind: "structured"; key: string; value: string };
+
 export interface InstancePeerRecord {
   instanceId: string;
   peerId: string;
