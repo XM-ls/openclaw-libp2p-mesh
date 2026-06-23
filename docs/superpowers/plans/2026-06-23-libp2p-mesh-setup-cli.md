@@ -539,6 +539,10 @@ git commit -m "feat: add setup inbound target helpers"
 
 ## 任务 3: 向导控制器与写入安全
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `77ef96f` `feat: add libp2p mesh setup wizard`, `bb4d86c` `fix: complete setup wizard edit flow`
+
 **Harness（测试框架）:**
 
 - **范围：** 创建 `src/setup-wizard.ts`，实现首次配置、已有配置编辑、preview、确认写入、取消不写入、Ctrl+C 取消语义的控制器。不注册真实 CLI，不依赖真实终端输入。
