@@ -197,6 +197,35 @@ test("setInboundTargets supports disable and skip semantics", () => {
   );
 });
 
+test("setInboundTargets clears legacy inbound fields when writing new targets", () => {
+  assert.deepEqual(
+    setInboundTargets(
+      {
+        discovery: "mdns",
+        inboundChannel: "feishu",
+        inboundTarget: "user:legacy",
+      },
+      [{ id: "telegram-main", channel: "telegram", target: "chat:123" }],
+    ),
+    {
+      discovery: "mdns",
+      inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123" }],
+    },
+  );
+
+  assert.deepEqual(
+    disableInboundDelivery({
+      discovery: "mdns",
+      inboundChannel: "feishu",
+      inboundTarget: "user:legacy",
+    }),
+    {
+      discovery: "mdns",
+      inboundTargets: [],
+    },
+  );
+});
+
 test("migrateLegacyInboundConfig converts keeps or replaces legacy fields", () => {
   const legacy = {
     discovery: "mdns" as const,

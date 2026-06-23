@@ -129,6 +129,220 @@ test("existing config edit can add target and keep network mode after preview-ap
   });
 });
 
+test("existing legacy inbound edit can keep legacy fields without writing empty inboundTargets", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundChannel: "feishu",
+              inboundTarget: "user:legacy",
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+    },
+    writer,
+    prompter: makePrompter(["inbound-targets", "keep-legacy-inbound", "preview-apply", true]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundChannel: "feishu",
+    inboundTarget: "user:legacy",
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing legacy inbound edit can convert legacy fields to inboundTargets", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundChannel: "feishu",
+              inboundTarget: "user:legacy",
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+    },
+    writer,
+    prompter: makePrompter(["inbound-targets", "convert-legacy-inbound", "preview-apply", true]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:legacy" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing legacy inbound edit can replace legacy fields with new inboundTargets", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundChannel: "feishu",
+              inboundTarget: "user:legacy",
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+      channels: {
+        telegram: { enabled: true },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "inbound-targets",
+      "replace-legacy-inbound",
+      "telegram",
+      "chat:123456",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing inbound target menu can remove a target", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [
+                { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+                { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+              ],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "inbound-targets",
+      "remove-target",
+      "feishu-main",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing inbound target menu can edit a target", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "inbound-targets",
+      "edit-target",
+      "feishu-main",
+      "telegram",
+      "chat:edited",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ id: "feishu-main", channel: "telegram", target: "chat:edited" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing inbound target menu can disable inbound delivery", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundChannel: "feishu",
+              inboundTarget: "user:legacy",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+    },
+    writer,
+    prompter: makePrompter(["inbound-targets", "disable-inbound", "preview-apply", true]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
 test("existing config edit loops until preview-apply after changing network mode and inbound targets", async () => {
   const { writer, writes } = makeWriter();
   const result = await runSetupWizard({
@@ -249,7 +463,7 @@ test("Ctrl+C cancellation from input exits without writing", async () => {
     writer,
     prompter: {
       async confirm() {
-        return false;
+        return true;
       },
       async select() {
         return "relay-node";

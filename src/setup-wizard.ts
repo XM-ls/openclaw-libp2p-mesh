@@ -7,6 +7,8 @@ import {
   getLibp2pMeshConfig,
   listConfiguredChannels,
   mergeNetworkConfig,
+  migrateLegacyInboundConfig,
+  removeInboundTarget,
   setInboundTargets,
   type OpenClawConfigLike,
   type SetupMode,
@@ -35,7 +37,12 @@ export type SetupPromptChoice =
   | "skip-inbound"
   | "network-mode"
   | "inbound-targets"
+  | "convert-legacy-inbound"
+  | "keep-legacy-inbound"
+  | "replace-legacy-inbound"
   | "add-target"
+  | "edit-target"
+  | "remove-target"
   | "finish-targets"
   | "preview-apply";
 
@@ -158,10 +165,7 @@ async function runExistingConfigFlow(
         break;
       }
       case "inbound-targets":
-        pluginConfig = setInboundTargets(
-          pluginConfig,
-          await promptForInboundTargets(pluginConfig.inboundTargets ?? [], options, { promptInitialAction: true }),
-        );
+        pluginConfig = await promptForExistingInboundConfig(pluginConfig, options);
         break;
       case "preview-apply":
         return pluginConfig;
@@ -169,6 +173,40 @@ async function runExistingConfigFlow(
         return undefined;
     }
   }
+}
+
+async function promptForExistingInboundConfig(
+  pluginConfig: MeshConfig,
+  options: RunSetupWizardOptions,
+): Promise<MeshConfig> {
+  if (hasLegacyOnlyInboundConfig(pluginConfig)) {
+    const migrationChoice = await options.prompter.select("Legacy inbound target config found. How do you want to continue?", [
+      { label: "Convert legacy target to inboundTargets", value: "convert-legacy-inbound" },
+      { label: "Keep legacy inboundChannel/inboundTarget", value: "keep-legacy-inbound" },
+      { label: "Replace with new inboundTargets", value: "replace-legacy-inbound" },
+    ]);
+
+    switch (migrationChoice) {
+      case "convert-legacy-inbound":
+        return migrateLegacyInboundConfig(pluginConfig, "convert");
+      case "keep-legacy-inbound":
+        return migrateLegacyInboundConfig(pluginConfig, "keep");
+      case "replace-legacy-inbound":
+        return migrateLegacyInboundConfig(pluginConfig, "replace", await promptForInboundTargets([], options));
+    }
+  }
+
+  const editResult = await promptForInboundTargetEdits(pluginConfig.inboundTargets ?? [], options);
+  switch (editResult.action) {
+    case "save":
+      return setInboundTargets(pluginConfig, editResult.targets);
+    case "disable":
+      return disableInboundDelivery(pluginConfig);
+  }
+}
+
+function hasLegacyOnlyInboundConfig(pluginConfig: MeshConfig): boolean {
+  return Boolean(pluginConfig.inboundChannel && pluginConfig.inboundTarget && !Array.isArray(pluginConfig.inboundTargets));
 }
 
 async function selectSetupMode(prompter: SetupPrompter): Promise<SetupMode> {
@@ -261,6 +299,118 @@ async function promptForInboundTargets(
   }
 
   return targets;
+}
+
+type InboundTargetEditResult =
+  | { action: "save"; targets: InboundTargetConfig[] }
+  | { action: "disable" };
+
+async function promptForInboundTargetEdits(
+  existingTargets: InboundTargetConfig[],
+  options: RunSetupWizardOptions,
+): Promise<InboundTargetEditResult> {
+  let targets = existingTargets.map((target) => ({ ...target }));
+
+  while (true) {
+    const action = await options.prompter.select("What do you want to do?", [
+      { label: "Add target", value: "add-target" },
+      { label: "Edit target", value: "edit-target" },
+      { label: "Remove target", value: "remove-target" },
+      { label: "Disable inbound delivery", value: "disable-inbound" },
+      { label: "Back", value: "finish-targets" },
+    ]);
+
+    switch (action) {
+      case "add-target":
+        targets = await promptForOneInboundTarget(targets, options);
+        break;
+      case "edit-target":
+        targets = await promptForInboundTargetEdit(targets, options);
+        break;
+      case "remove-target":
+        targets = await promptForInboundTargetRemoval(targets, options);
+        break;
+      case "disable-inbound":
+        return { action: "disable" };
+      case "finish-targets":
+        return { action: "save", targets };
+    }
+  }
+}
+
+async function promptForOneInboundTarget(
+  targets: InboundTargetConfig[],
+  options: RunSetupWizardOptions,
+): Promise<InboundTargetConfig[]> {
+  const channel = await promptForChannel(options);
+  const target = await options.prompter.input("Target", { required: true });
+  const addResult = addInboundTarget(targets, { channel, target });
+
+  if (addResult.ok) {
+    return addResult.targets;
+  }
+
+  options.prompter.print(addResult.error);
+  return targets;
+}
+
+async function promptForInboundTargetEdit(
+  targets: InboundTargetConfig[],
+  options: RunSetupWizardOptions,
+): Promise<InboundTargetConfig[]> {
+  if (targets.length === 0) {
+    options.prompter.print("No inbound targets configured.");
+    return targets;
+  }
+
+  const id = await selectInboundTargetId(options.prompter, "Target to edit", targets);
+  const channel = await promptForChannel(options);
+  const target = await options.prompter.input("Target", { required: true });
+  const duplicate = targets.some(
+    (existingTarget) => existingTarget.id !== id && existingTarget.channel === channel && existingTarget.target === target,
+  );
+
+  if (duplicate) {
+    options.prompter.print(`inbound target already exists: ${channel} / ${target}`);
+    return targets;
+  }
+
+  return targets.map((existingTarget) =>
+    existingTarget.id === id
+      ? {
+          ...existingTarget,
+          channel,
+          target,
+        }
+      : { ...existingTarget },
+  );
+}
+
+async function promptForInboundTargetRemoval(
+  targets: InboundTargetConfig[],
+  options: RunSetupWizardOptions,
+): Promise<InboundTargetConfig[]> {
+  if (targets.length === 0) {
+    options.prompter.print("No inbound targets configured.");
+    return targets;
+  }
+
+  const id = await selectInboundTargetId(options.prompter, "Target to remove", targets);
+  return removeInboundTarget(targets, id);
+}
+
+async function selectInboundTargetId(
+  prompter: SetupPrompter,
+  message: string,
+  targets: InboundTargetConfig[],
+): Promise<string> {
+  return prompter.select(
+    message,
+    targets.map((target, index) => ({
+      label: `${target.id ?? `target-${index + 1}`}     ${target.channel} / ${target.target}`,
+      value: target.id ?? `target-${index + 1}`,
+    })),
+  );
 }
 
 async function promptForChannel(options: RunSetupWizardOptions): Promise<string> {

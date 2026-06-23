@@ -184,8 +184,11 @@ export function setInboundTargets(
     return withoutInboundTargets;
   }
 
+  const { inboundChannel: _inboundChannel, inboundTarget: _inboundTarget, ...withoutLegacyFields } =
+    withoutInboundTargets;
+
   return {
-    ...withoutInboundTargets,
+    ...withoutLegacyFields,
     inboundTargets: targets.map((target) => ({ ...target })),
   };
 }
