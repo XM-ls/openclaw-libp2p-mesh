@@ -637,6 +637,10 @@ git commit -m "feat: send messages by user public attribute"
 
 ## 任务 7: README 与最终验证
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `2721166` `docs: document user public attributes`
+
 **Harness（测试框架）:**
 
 - **范围：** 更新 README，记录用户公开属性、`profile` 命令、`user-profile.json`、`instance-peer.json.userPublicAttributes`、按属性发送工具和隐私边界；运行最终验证并更新本计划状态。不修改功能代码。
