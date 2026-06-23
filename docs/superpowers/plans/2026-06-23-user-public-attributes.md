@@ -331,6 +331,10 @@ git commit -m "feat: extract user public tags from user md"
 
 ## 任务 4: announce 与 instance-peer.json 集成
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `8d24141` `feat: announce user public attributes`
+
 **Harness（测试框架）:**
 
 - **范围：** 在 `InstanceAnnouncePayload` 和 `InstancePeerRecord` 中加入 `userPublicAttributes`；构造 announce 时合并 USER.md tag 和 profile structured 属性；远端 store 保存属性。暂不实现 profile CLI 和按属性发送工具。
