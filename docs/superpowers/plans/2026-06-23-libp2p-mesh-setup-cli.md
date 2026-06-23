@@ -1040,6 +1040,10 @@ git commit -m "feat: register libp2p mesh setup cli"
 
 ## 任务 5: README 使用说明
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `38d6f85` `docs: document libp2p mesh setup cli`
+
 **Harness（测试框架）:**
 
 - **范围：** 更新 README，说明 `openclaw libp2p-mesh setup` 用法、首次配置、编辑配置、写入路径、多入站目标和重启提示。不修改代码。
