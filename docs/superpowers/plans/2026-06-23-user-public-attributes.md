@@ -534,6 +534,10 @@ git commit -m "feat: add libp2p mesh profile cli"
 
 ## 任务 6: 按用户属性发送 agent tool
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `9f31ac0` `feat: send messages by user public attribute`
+
 **Harness（测试框架）:**
 
 - **范围：** 新增 `p2p_send_user_attribute_message` agent tool，并在 router 中提供按属性匹配、dry run 和实际发送。复用现有 `sendInstanceMessage()`，不新增底层 P2P 消息类型。
