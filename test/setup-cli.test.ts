@@ -34,10 +34,15 @@ function makeCommand(name: string): FakeCommand {
   };
 }
 
-function makeApi(root: FakeCommand, config: Record<string, unknown> = {}) {
+function makeApi(
+  root: FakeCommand,
+  config: Record<string, unknown> = {},
+  options: { includeRuntimeChannel?: boolean } = {},
+) {
   const registrations: Array<{ opts?: unknown }> = [];
   const mutations: unknown[] = [];
   const mutatedDrafts: Array<Record<string, unknown>> = [];
+  const includeRuntimeChannel = options.includeRuntimeChannel ?? true;
   const api = {
     id: "libp2p-mesh",
     name: "libp2p-mesh",
@@ -52,11 +57,15 @@ function makeApi(root: FakeCommand, config: Record<string, unknown> = {}) {
       error() {},
     },
     runtime: {
-      channel: {
-        outbound: {
-          loadAdapter() {},
-        },
-      },
+      ...(includeRuntimeChannel
+        ? {
+            channel: {
+              outbound: {
+                loadAdapter() {},
+              },
+            },
+          }
+        : {}),
       config: {
         current: () => config,
         mutateConfigFile: async (params: {
@@ -212,4 +221,16 @@ test("registerLibp2pMesh registers setup cli without changing existing registrat
     "tool",
     "hook",
   ]);
+});
+
+test("registerLibp2pMesh registers setup cli when runtime channel outbound is unavailable", () => {
+  const root = makeCommand("openclaw");
+  const { api, registrations } = makeApi(root, {}, { includeRuntimeChannel: false });
+
+  assert.doesNotThrow(() => registerLibp2pMesh(api));
+  assert.equal(registrations.length, 1);
+
+  const libp2p = root.children.find((child) => child.name === "libp2p-mesh");
+  assert.ok(libp2p);
+  assert.ok(libp2p.children.find((child) => child.name === "setup"));
 });

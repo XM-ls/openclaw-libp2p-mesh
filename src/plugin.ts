@@ -23,7 +23,16 @@ export function registerLibp2pMesh(api: OpenClawPluginApi) {
   const store = createInstancePeerStore({ logger: api.logger });
   const delivery = createOpenClawRuntimeInboundDelivery({
     config: api.config,
-    loadAdapter: api.runtime.channel.outbound.loadAdapter,
+    loadAdapter: async (channelId) => {
+      const loadAdapter = api.runtime.channel?.outbound?.loadAdapter;
+      if (!loadAdapter) {
+        api.logger.warn?.(
+          "[libp2p-mesh] Runtime channel outbound adapter is unavailable; inbound delivery is disabled in this context.",
+        );
+        return undefined;
+      }
+      return loadAdapter(channelId);
+    },
     logger: api.logger,
   });
   const router = createInstanceRouter({
