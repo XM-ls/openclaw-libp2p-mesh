@@ -274,6 +274,8 @@ test("empty inboundTargets disables fallback and returns unconfigured failure", 
   assert.equal(deliveries.length, 0);
   const ack = parseAck(sent);
   assert.equal(ack.ok, false);
+  assert.equal(ack.inboundChannel, undefined);
+  assert.equal(ack.inboundTarget, undefined);
   assert.equal(ack.error, "inbound delivery is not configured");
   assert.deepEqual(ack.results, []);
 });

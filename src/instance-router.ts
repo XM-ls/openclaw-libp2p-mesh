@@ -295,8 +295,6 @@ export function createInstanceRouter(options: {
       ack = {
         ackFor: payload.messageId,
         ok: false,
-        inboundChannel: config.inboundChannel,
-        inboundTarget: config.inboundTarget,
         deliveredAt: Date.now(),
         error: "inbound delivery is not configured",
         results: [],
