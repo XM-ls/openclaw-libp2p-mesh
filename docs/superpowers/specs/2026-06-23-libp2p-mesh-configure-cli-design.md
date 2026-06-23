@@ -7,7 +7,7 @@
 目标命令：
 
 ```bash
-openclaw libp2p-mesh configure
+openclaw libp2p-mesh setup
 ```
 
 配置向导最终只写入：
@@ -25,7 +25,7 @@ channels["libp2p-mesh"]
 ## 非目标
 
 - 不接入核心 `openclaw onboard` 主流程作为第一版目标。
-- 不实现独立的 `npx libp2p-mesh configure` 配置器。
+- 不实现独立的 `npx libp2p-mesh setup` 配置器。
 - 不要求用户手动编辑 `openclaw.json`。
 - 不让发送方选择接收方的 channel 或 target。
 - 不默认让用户理解底层 libp2p/NAT 参数；向导按场景生成配置。
@@ -570,7 +570,7 @@ openclaw gateway restart
 api.registerCli(...)
 ```
 
-注册 `openclaw libp2p-mesh configure`。
+注册 `openclaw libp2p-mesh setup`。
 
 该模块只负责连接 OpenClaw CLI API 和配置向导控制器，不直接拼配置。
 
@@ -661,13 +661,13 @@ config.channels
 
 覆盖：
 
-- `openclaw libp2p-mesh configure` 注册成功。
+- `openclaw libp2p-mesh setup` 注册成功。
 - dry-run/preview 流程可测试。
 - 写入路径是 `plugins.entries["libp2p-mesh"]`。
 
 ## 验收标准
 
-- 用户可以通过 `openclaw libp2p-mesh configure` 完成首次配置。
+- 用户可以通过 `openclaw libp2p-mesh setup` 完成首次配置。
 - 用户可以重复运行该命令编辑现有配置。
 - 向导支持一个或多个 `inboundTargets`。
 - 向导默认写入 `deliveryAckTimeoutMs: 15000`，但不询问用户。
