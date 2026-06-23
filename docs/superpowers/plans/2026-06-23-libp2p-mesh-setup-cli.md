@@ -541,7 +541,7 @@ git commit -m "feat: add setup inbound target helpers"
 
 **Status:** ✅ COMPLETE
 **Completed:** 2026-06-23
-**Commits:** `77ef96f` `feat: add libp2p mesh setup wizard`, `bb4d86c` `fix: complete setup wizard edit flow`
+**Commits:** `77ef96f` `feat: add libp2p mesh setup wizard`, `bb4d86c` `fix: complete setup wizard edit flow`, `2fd5ef9` `fix: complete setup wizard target management`, `6f1e8f5` `fix: handle setup targets without ids`
 
 **Harness（测试框架）:**
 
@@ -1131,7 +1131,7 @@ git commit -m "docs: document libp2p mesh setup cli"
 
 **Status:** ✅ COMPLETE
 **Completed:** 2026-06-23
-**Commits:** `this commit` `docs: record libp2p mesh setup cli progress`
+**Commits:** `a797b32` `docs: record libp2p mesh setup cli progress`
 
 **Harness（测试框架）:**
 
