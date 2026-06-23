@@ -7,10 +7,12 @@ import type {
   InstanceRouterOptions,
   MeshConfig,
   P2PMessage,
+  UserAttributeMatch,
+  UserAttributeMessageTarget,
   UserPublicAttribute,
   UserMessagePayload,
 } from "./types.js";
-import { mergeUserPublicAttributes } from "./user-attributes.js";
+import { matchesUserAttribute, mergeUserPublicAttributes } from "./user-attributes.js";
 
 export type RouterLogger = {
   info?: (message: string) => void;
@@ -46,6 +48,14 @@ function isNonEmptyString(value: unknown): value is string {
 
 function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function describeAttributeMatch(match: UserAttributeMatch): string {
+  if (match.kind === "tag") {
+    return `tag ${match.value}`;
+  }
+
+  return `structured attribute ${match.key}=${match.value}`;
 }
 
 type EffectiveInboundTarget = {
@@ -563,6 +573,90 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     };
   }
 
+  async function resolveUserAttributeTargets(
+    match: UserAttributeMatch,
+  ): Promise<UserAttributeMessageTarget[]> {
+    const records = await store.list();
+    const targets: UserAttributeMessageTarget[] = [];
+
+    for (const record of records) {
+      const matchedAttribute = record.userPublicAttributes?.find((attribute) =>
+        matchesUserAttribute(attribute, match),
+      );
+      if (!matchedAttribute) {
+        continue;
+      }
+
+      targets.push({
+        instanceId: record.instanceId,
+        instanceName: record.instanceName,
+        peerId: record.peerId,
+        matchedAttribute,
+      });
+    }
+
+    return targets;
+  }
+
+  async function sendUserAttributeMessage(
+    match: UserAttributeMatch,
+    message: string,
+    sendOptions: { dryRun?: boolean } = {},
+  ) {
+    const targets = await resolveUserAttributeTargets(match);
+    if (targets.length === 0) {
+      return {
+        matched: 0,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        error: `No discovered instances match ${describeAttributeMatch(match)}.`,
+      };
+    }
+
+    if (sendOptions.dryRun === true) {
+      return {
+        matched: targets.length,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        targets,
+      };
+    }
+
+    const results = [];
+    for (const target of targets) {
+      try {
+        const result = await sendInstanceMessage(target.instanceId, message);
+        const targetResult = {
+          ...target,
+          sent: result.sent,
+          delivered: result.delivered,
+        };
+        if (result.error) {
+          results.push({ ...targetResult, error: result.error });
+        } else {
+          results.push(targetResult);
+        }
+      } catch (error) {
+        results.push({
+          ...target,
+          sent: false,
+          delivered: false,
+          error: summarizeError(error),
+        });
+      }
+    }
+
+    return {
+      matched: targets.length,
+      sent: results.filter((result) => result.sent).length,
+      delivered: results.filter((result) => result.delivered).length,
+      failed: results.filter((result) => !result.delivered).length,
+      results,
+    };
+  }
+
   return {
     start,
     stop,
@@ -571,5 +665,6 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     listInstances,
     resolveInstance,
     sendInstanceMessage,
+    sendUserAttributeMessage,
   };
 }

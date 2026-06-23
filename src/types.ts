@@ -135,6 +135,29 @@ export interface InstancePeerStore {
   }>;
 }
 
+export type UserAttributeMessageTarget = {
+  instanceId: string;
+  instanceName?: string;
+  peerId: string;
+  matchedAttribute: UserPublicAttribute;
+};
+
+export type UserAttributeMessageDeliveryResult = UserAttributeMessageTarget & {
+  sent: boolean;
+  delivered: boolean;
+  error?: string;
+};
+
+export type UserAttributeMessageResult = {
+  matched: number;
+  sent: number;
+  delivered: number;
+  failed: number;
+  targets?: UserAttributeMessageTarget[];
+  results?: UserAttributeMessageDeliveryResult[];
+  error?: string;
+};
+
 export interface InboundDeliveryRequest {
   channel: string;
   target: string;
@@ -197,6 +220,11 @@ export interface InstanceRouter {
     deliveryResults?: DeliveryTargetResult[];
     error?: string;
   }>;
+  sendUserAttributeMessage(
+    match: UserAttributeMatch,
+    message: string,
+    options?: { dryRun?: boolean },
+  ): Promise<UserAttributeMessageResult>;
 }
 
 export interface MeshConfig {

@@ -219,6 +219,7 @@ test("registerLibp2pMesh registers setup cli without changing existing registrat
     "tool",
     "tool",
     "tool",
+    "tool",
     "hook",
   ]);
 });

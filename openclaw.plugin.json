@@ -197,7 +197,8 @@
       "p2p_get_network_info",
       "p2p_list_instances",
       "p2p_resolve_instance",
-      "p2p_send_instance_message"
+      "p2p_send_instance_message",
+      "p2p_send_user_attribute_message"
     ]
   },
   "uiHints": {

@@ -1,4 +1,12 @@
-import type { DeliveryTargetResult, InstanceRouter, MeshNetwork } from "./types.js";
+import type {
+  DeliveryTargetResult,
+  InstanceRouter,
+  MeshNetwork,
+  UserAttributeMatch,
+  UserAttributeMessageDeliveryResult,
+  UserAttributeMessageTarget,
+  UserPublicAttribute,
+} from "./types.js";
 
 function targetLabel(result: DeliveryTargetResult) {
   const name = result.id ?? `${result.channel}:${result.target}`;
@@ -18,6 +26,68 @@ function formatDeliveryResults(
     return `${targetLabel(result)}：${status}`;
   });
   return [heading, ...lines].join("\n");
+}
+
+function attributeLabel(attribute: UserPublicAttribute): string {
+  if (attribute.kind === "tag") {
+    return `tag:${attribute.value}`;
+  }
+
+  return `${attribute.key}:${attribute.value}`;
+}
+
+function instanceTargetLabel(target: Pick<UserAttributeMessageTarget, "instanceId" | "instanceName" | "peerId">) {
+  const name = target.instanceName ? ` (${target.instanceName})` : "";
+  return `${target.instanceId}${name} -> ${target.peerId}`;
+}
+
+function formatUserAttributeTargets(targets: UserAttributeMessageTarget[]) {
+  return targets.map((target) => `${instanceTargetLabel(target)} [${attributeLabel(target.matchedAttribute)}]`);
+}
+
+function formatUserAttributeResults(results: UserAttributeMessageDeliveryResult[]) {
+  return results.map((result) => {
+    let status = "已送达";
+    if (!result.sent) {
+      status = `发送失败：${result.error ?? "unknown error"}`;
+    } else if (!result.delivered) {
+      status = `投递失败：${result.error ?? "unknown error"}`;
+    }
+
+    return `${instanceTargetLabel(result)}：${status}`;
+  });
+}
+
+type SendUserAttributeToolParams = {
+  match?: {
+    kind?: unknown;
+    key?: unknown;
+    value?: unknown;
+  };
+  message?: unknown;
+  dryRun?: unknown;
+};
+
+function normalizeUserAttributeMatch(params: SendUserAttributeToolParams): UserAttributeMatch | string {
+  const match = params.match;
+  if (!match || typeof match !== "object") {
+    return "match is required.";
+  }
+
+  if (match.kind === "tag") {
+    const value = typeof match.value === "string" ? match.value.trim() : "";
+    return value ? { kind: "tag", value } : "match.value is required for tag matches.";
+  }
+
+  if (match.kind === "structured") {
+    const key = typeof match.key === "string" ? match.key.trim() : "";
+    const value = typeof match.value === "string" ? match.value.trim() : "";
+    return key && value
+      ? { kind: "structured", key, value }
+      : "match.key and match.value are required for structured matches.";
+  }
+
+  return 'match.kind must be "tag" or "structured".';
 }
 
 export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
@@ -375,6 +445,122 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
             },
           ],
           details: result,
+        };
+      },
+    },
+    {
+      name: "p2p_send_user_attribute_message",
+      label: "P2P Send User Attribute Message",
+      description:
+        "Send a user message to discovered OpenClaw instances matching a public user attribute. Always run a dry run with dryRun=true first and ask the user to confirm targets before group sending.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          match: {
+            type: "object" as const,
+            description:
+              'User public attribute match. Use { "kind": "tag", "value": "..." } for USER.md tags or { "kind": "structured", "key": "...", "value": "..." } for profile attributes.',
+            oneOf: [
+              {
+                type: "object" as const,
+                additionalProperties: false,
+                properties: {
+                  kind: { const: "tag" as const },
+                  value: {
+                    type: "string" as const,
+                    description: "Tag value to match.",
+                  },
+                },
+                required: ["kind", "value"],
+              },
+              {
+                type: "object" as const,
+                additionalProperties: false,
+                properties: {
+                  kind: { const: "structured" as const },
+                  key: {
+                    type: "string" as const,
+                    description: "Structured attribute key to match.",
+                  },
+                  value: {
+                    type: "string" as const,
+                    description: "Structured attribute value to match.",
+                  },
+                },
+                required: ["kind", "key", "value"],
+              },
+            ],
+          },
+          message: {
+            type: "string" as const,
+            description: "Message content to send after dry-run target confirmation.",
+          },
+          dryRun: {
+            type: "boolean" as const,
+            description: "Preview matching instances without sending. Run this before group sending.",
+          },
+        },
+        required: ["match", "message"],
+      },
+      async execute(_toolCallId: string, params: SendUserAttributeToolParams) {
+        if (!router) {
+          return {
+            content: [{ type: "text" as const, text: "Instance router is not initialized." }],
+            details: { initialized: false },
+            isError: true,
+          };
+        }
+
+        const match = normalizeUserAttributeMatch(params);
+        const message = typeof params.message === "string" ? params.message.trim() : "";
+        if (typeof match === "string" || !message) {
+          const error = typeof match === "string" ? match : "message is required.";
+          return {
+            content: [{ type: "text" as const, text: error }],
+            details: { error },
+            isError: true,
+          };
+        }
+
+        const dryRun = params.dryRun === true;
+        const result = await router.sendUserAttributeMessage(match, message, { dryRun });
+        if (result.error) {
+          return {
+            content: [{ type: "text" as const, text: result.error }],
+            details: result,
+            isError: true,
+          };
+        }
+
+        if (dryRun) {
+          const targetLines = formatUserAttributeTargets(result.targets ?? []);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: [
+                  `Dry run matched ${result.matched} instance(s). No message was sent.`,
+                  ...targetLines,
+                ].join("\n"),
+              },
+            ],
+            details: result,
+          };
+        }
+
+        const resultLines = formatUserAttributeResults(result.results ?? []);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: [
+                `Matched ${result.matched} instance(s); sent ${result.sent}; delivered ${result.delivered}; failed ${result.failed}.`,
+                ...resultLines,
+              ].join("\n"),
+            },
+          ],
+          details: result,
+          isError: result.failed > 0 ? true : undefined,
         };
       },
     },

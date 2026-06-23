@@ -17,11 +17,17 @@ type SentMessage = {
   message: Parameters<MeshNetwork["sendStructuredMessage"]>[1];
 };
 
-function makeRecord(instanceId: string, peerId: string): InstancePeerRecord {
+function makeRecord(
+  instanceId: string,
+  peerId: string,
+  fields: Partial<Pick<InstancePeerRecord, "instanceName" | "userPublicAttributes">> = {},
+): InstancePeerRecord {
   return {
     instanceId,
     peerId,
+    instanceName: fields.instanceName,
     multiaddrs: [],
+    userPublicAttributes: fields.userPublicAttributes,
     lastSeenAt: 1,
     lastAnnouncedAt: 1,
     source: "announce",
@@ -261,6 +267,238 @@ test("announceToPeer sends merged USER.md and profile user public attributes", a
   assert.equal(sent[0].message.type, "instance-announce");
   const payload = JSON.parse(sent[0].message.payload);
   assert.deepEqual(payload.userPublicAttributes, [userMdTag, profileAttribute]);
+});
+
+test("sendUserAttributeMessage dry run returns tag-matched targets without sending", async () => {
+  const sent: SentMessage[] = [];
+  const researchLoopTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "ResearchLoop",
+    label: "ResearchLoop",
+    source: "USER.md",
+  };
+  const otherTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "Other",
+    label: "Other",
+    source: "USER.md",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([
+      makeRecord("alpha@abc.111", "peer-alpha", {
+        instanceName: "alpha",
+        userPublicAttributes: [researchLoopTag],
+      }),
+      makeRecord("beta@abc.222", "peer-beta", {
+        instanceName: "beta",
+        userPublicAttributes: [otherTag, researchLoopTag],
+      }),
+      makeRecord("gamma@abc.333", "peer-gamma", {
+        instanceName: "gamma",
+        userPublicAttributes: [otherTag],
+      }),
+    ]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "tag", value: " researchloop " },
+    "hello team",
+    { dryRun: true },
+  );
+
+  assert.equal(result.matched, 2);
+  assert.equal(result.sent, 0);
+  assert.equal(result.delivered, 0);
+  assert.equal(result.failed, 0);
+  assert.deepEqual(result.targets, [
+    {
+      instanceId: "alpha@abc.111",
+      instanceName: "alpha",
+      peerId: "peer-alpha",
+      matchedAttribute: researchLoopTag,
+    },
+    {
+      instanceId: "beta@abc.222",
+      instanceName: "beta",
+      peerId: "peer-beta",
+      matchedAttribute: researchLoopTag,
+    },
+  ]);
+  assert.equal(result.results, undefined);
+  assert.equal(sent.length, 0);
+});
+
+test("sendUserAttributeMessage distinguishes tag and structured matches", async () => {
+  const sent: SentMessage[] = [];
+  const tag: UserPublicAttribute = {
+    kind: "tag",
+    value: "ResearchLoop",
+    label: "ResearchLoop",
+    source: "USER.md",
+  };
+  const structured: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "ResearchLoop",
+    label: "ResearchLoop project",
+    source: "profile",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([
+      makeRecord("tagged@abc.111", "peer-tagged", { userPublicAttributes: [tag] }),
+      makeRecord("structured@abc.222", "peer-structured", {
+        userPublicAttributes: [structured],
+      }),
+    ]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const tagResult = await router.sendUserAttributeMessage(
+    { kind: "tag", value: "researchloop" },
+    "hello tags",
+    { dryRun: true },
+  );
+  const structuredResult = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "PROJECT", value: " researchloop " },
+    "hello project",
+    { dryRun: true },
+  );
+
+  assert.deepEqual(
+    tagResult.targets?.map((target) => target.instanceId),
+    ["tagged@abc.111"],
+  );
+  assert.deepEqual(
+    structuredResult.targets?.map((target) => target.instanceId),
+    ["structured@abc.222"],
+  );
+});
+
+test("sendUserAttributeMessage sends user messages to every match and continues after failures", async () => {
+  const sent: SentMessage[] = [];
+  const researchLoopTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "ResearchLoop",
+    label: "ResearchLoop",
+    source: "USER.md",
+  };
+  const ackByPeer = new Map([
+    ["peer-alpha", { ok: true }],
+    ["peer-gamma", { ok: false, error: "remote delivery failed" }],
+  ]);
+  let router: ReturnType<typeof createInstanceRouter>;
+  const mesh = makeMesh(sent);
+  mesh.sendStructuredMessage = async (peerId, message) => {
+    if (peerId === "peer-beta") {
+      throw new Error("dial failed");
+    }
+    sent.push({ peerId, message });
+    if (message.type !== "user-message") {
+      return;
+    }
+    const ack = ackByPeer.get(peerId) ?? { ok: false, error: "unexpected peer" };
+    queueMicrotask(() => {
+      router
+        .handleMessage({
+          id: `ack-${message.id}`,
+          type: "delivery-ack",
+          from: peerId,
+          to: "local-peer",
+          timestamp: 1,
+          payload: JSON.stringify({
+            ackFor: message.id,
+            ok: ack.ok,
+            inboundChannel: ack.ok ? "feishu" : undefined,
+            inboundTarget: ack.ok ? "user:ou_xxx" : undefined,
+            deliveredAt: 1,
+            error: ack.error,
+          }),
+        })
+        .catch((error) => {
+          throw error;
+        });
+    });
+  };
+  router = createInstanceRouter({
+    mesh,
+    store: makeStore([
+      makeRecord("alpha@abc.111", "peer-alpha", {
+        instanceName: "alpha",
+        userPublicAttributes: [researchLoopTag],
+      }),
+      makeRecord("beta@abc.222", "peer-beta", {
+        instanceName: "beta",
+        userPublicAttributes: [researchLoopTag],
+      }),
+      makeRecord("gamma@abc.333", "peer-gamma", {
+        instanceName: "gamma",
+        userPublicAttributes: [researchLoopTag],
+      }),
+    ]),
+    config: {
+      deliveryAckTimeoutMs: 1000,
+    },
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "tag", value: "ResearchLoop" },
+    "hello team",
+  );
+
+  assert.equal(result.matched, 3);
+  assert.equal(result.sent, 2);
+  assert.equal(result.delivered, 1);
+  assert.equal(result.failed, 2);
+  assert.deepEqual(
+    sent.map((item) => [item.peerId, item.message.type]),
+    [
+      ["peer-alpha", "user-message"],
+      ["peer-gamma", "user-message"],
+    ],
+  );
+  assert.deepEqual(
+    sent.map((item) => JSON.parse(item.message.payload).toInstanceId),
+    ["alpha@abc.111", "gamma@abc.333"],
+  );
+  assert.deepEqual(result.results, [
+    {
+      instanceId: "alpha@abc.111",
+      instanceName: "alpha",
+      peerId: "peer-alpha",
+      matchedAttribute: researchLoopTag,
+      sent: true,
+      delivered: true,
+    },
+    {
+      instanceId: "beta@abc.222",
+      instanceName: "beta",
+      peerId: "peer-beta",
+      matchedAttribute: researchLoopTag,
+      sent: false,
+      delivered: false,
+      error: "dial failed",
+    },
+    {
+      instanceId: "gamma@abc.333",
+      instanceName: "gamma",
+      peerId: "peer-gamma",
+      matchedAttribute: researchLoopTag,
+      sent: true,
+      delivered: false,
+      error: "remote delivery failed",
+    },
+  ]);
 });
 
 test("legacy single-target config still delivers once", async () => {
