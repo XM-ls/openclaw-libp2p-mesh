@@ -8,7 +8,6 @@ import {
   listConfiguredChannels,
   mergeNetworkConfig,
   migrateLegacyInboundConfig,
-  removeInboundTarget,
   setInboundTargets,
   type OpenClawConfigLike,
   type SetupMode,
@@ -363,11 +362,11 @@ async function promptForInboundTargetEdit(
     return targets;
   }
 
-  const id = await selectInboundTargetId(options.prompter, "Target to edit", targets);
+  const selectedIndex = await selectInboundTargetIndex(options.prompter, "Target to edit", targets);
   const channel = await promptForChannel(options);
   const target = await options.prompter.input("Target", { required: true });
   const duplicate = targets.some(
-    (existingTarget) => existingTarget.id !== id && existingTarget.channel === channel && existingTarget.target === target,
+    (existingTarget, index) => index !== selectedIndex && existingTarget.channel === channel && existingTarget.target === target,
   );
 
   if (duplicate) {
@@ -375,8 +374,8 @@ async function promptForInboundTargetEdit(
     return targets;
   }
 
-  return targets.map((existingTarget) =>
-    existingTarget.id === id
+  return targets.map((existingTarget, index) =>
+    index === selectedIndex
       ? {
           ...existingTarget,
           channel,
@@ -395,22 +394,38 @@ async function promptForInboundTargetRemoval(
     return targets;
   }
 
-  const id = await selectInboundTargetId(options.prompter, "Target to remove", targets);
-  return removeInboundTarget(targets, id);
+  const selectedIndex = await selectInboundTargetIndex(options.prompter, "Target to remove", targets);
+  return targets.filter((_target, index) => index !== selectedIndex).map((target) => ({ ...target }));
 }
 
-async function selectInboundTargetId(
+async function selectInboundTargetIndex(
   prompter: SetupPrompter,
   message: string,
   targets: InboundTargetConfig[],
-): Promise<string> {
-  return prompter.select(
+): Promise<number> {
+  const selectedKey = await prompter.select(
     message,
     targets.map((target, index) => ({
       label: `${target.id ?? `target-${index + 1}`}     ${target.channel} / ${target.target}`,
-      value: target.id ?? `target-${index + 1}`,
+      value: `target-index-${index}`,
     })),
   );
+  const indexMatch = /^target-index-(\d+)$/.exec(selectedKey);
+  if (indexMatch) {
+    return Number(indexMatch[1]);
+  }
+
+  const idIndex = targets.findIndex((target) => target.id === selectedKey);
+  if (idIndex >= 0) {
+    return idIndex;
+  }
+
+  const legacySyntheticKeyMatch = /^target-(\d+)$/.exec(selectedKey);
+  if (legacySyntheticKeyMatch) {
+    return Number(legacySyntheticKeyMatch[1]) - 1;
+  }
+
+  return -1;
 }
 
 async function promptForChannel(options: RunSetupWizardOptions): Promise<string> {

@@ -312,6 +312,87 @@ test("existing inbound target menu can edit a target", async () => {
   });
 });
 
+test("existing inbound target menu can edit a target without an id", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ channel: "feishu", target: "user:ou_xxx" }],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "inbound-targets",
+      "edit-target",
+      "target-1",
+      "telegram",
+      "chat:edited",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ channel: "telegram", target: "chat:edited" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing inbound target menu can remove a target without an id", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [
+                { channel: "feishu", target: "user:ou_xxx" },
+                { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+              ],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "inbound-targets",
+      "remove-target",
+      "target-1",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "mdns",
+    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
 test("existing inbound target menu can disable inbound delivery", async () => {
   const { writer, writes } = makeWriter();
   const result = await runSetupWizard({
