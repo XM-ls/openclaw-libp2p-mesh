@@ -158,6 +158,7 @@ If peers are on different networks, use a bootstrap node:
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
 | `inboundChannel` | `string` | `undefined` | OpenClaw channel used to display inbound P2P user messages, for example `"feishu"` |
 | `inboundTarget` | `string` | `undefined` | OpenClaw channel target for inbound P2P messages, for example `user:ou_xxx` or `chat:oc_xxx` |
+| `inboundTargets` | `array` | `undefined` | Optional list of receiver-owned channel targets for inbound P2P user messages. When present, it overrides `inboundChannel`/`inboundTarget`; an empty array disables inbound delivery. |
 | `deliveryAckTimeoutMs` | `number` | `15000` | Timeout for waiting on remote channel delivery ACKs |
 
 ## NAT Traversal
@@ -307,6 +308,40 @@ For Feishu inbound display, configure the receiving instance:
   }
 }
 ```
+
+### Multi-channel inbound delivery
+
+The sender still calls `p2p_send_instance_message({ "instanceId": "...", "message": "..." })`.
+The receiver chooses where inbound P2P messages appear:
+
+```json
+{
+  "plugins": {
+    "libp2p-mesh": {
+      "enabled": true,
+      "config": {
+        "discovery": "mdns",
+        "inboundTargets": [
+          {
+            "id": "feishu-main",
+            "channel": "feishu",
+            "target": "user:ou_xxx"
+          },
+          {
+            "id": "telegram-main",
+            "channel": "telegram",
+            "target": "chat:123456"
+          }
+        ],
+        "deliveryAckTimeoutMs": 15000
+      }
+    }
+  }
+}
+```
+
+If `inboundTargets` is present, it is used instead of `inboundChannel`/`inboundTarget`.
+The sender receives per-target delivery status in the tool result.
 
 The OpenClaw agent should prefer:
 
