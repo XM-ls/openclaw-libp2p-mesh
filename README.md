@@ -42,21 +42,33 @@ openclaw plugins registry --refresh
 
 The published npm package includes compiled JavaScript under `dist/`, so OpenClaw and acpx can load it directly.
 
-Then add to your `~/.openclaw/openclaw.json`:
+Then run the setup wizard:
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+The wizard creates or edits `plugins.entries["libp2p-mesh"].config` in your OpenClaw config file. You do not need to manually edit `openclaw.json`.
+
+After the wizard writes changes, restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+The generated config shape is:
 
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns"
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "deliveryAckTimeoutMs": 15000
+        }
       }
-    }
-  },
-  "channels": {
-    "libp2p-mesh": {
-      "enabled": true
     }
   }
 }
@@ -64,23 +76,43 @@ Then add to your `~/.openclaw/openclaw.json`:
 
 ## Configuration
 
-Add a `libp2p-mesh` block to your `openclaw.json` under `plugins`:
+Use the interactive setup command for first-time configuration and later edits:
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+On first run, the wizard enables the plugin and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. It can update the network mode, add or remove inbound delivery targets, preview the final JSON, and only writes after you confirm.
+
+The wizard uses OpenClaw's config writer, so the actual file is your normal OpenClaw config path, usually `~/.openclaw/openclaw.json`. You do not need to manually edit `openclaw.json`, and the wizard does not create `channels["libp2p-mesh"]`.
+
+Restart the gateway after applying changes:
+
+```bash
+openclaw gateway restart
+```
 
 ### Minimal LAN Setup (Default)
+
+Run:
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+Choose LAN mode for two computers on the same WiFi or Ethernet segment. The wizard writes:
 
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns"
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "deliveryAckTimeoutMs": 15000
+        }
       }
-    }
-  },
-  "channels": {
-    "libp2p-mesh": {
-      "enabled": true
     }
   }
 }
@@ -95,17 +127,15 @@ By default, the node picks a random TCP port. To use a fixed port:
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns",
-        "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"]
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
+          "deliveryAckTimeoutMs": 15000
+        }
       }
-    }
-  },
-  "channels": {
-    "libp2p-mesh": {
-      "enabled": true
     }
   }
 }
@@ -113,28 +143,66 @@ By default, the node picks a random TCP port. To use a fixed port:
 
 ### With Bootstrap Nodes (Cross-Network)
 
-If peers are on different networks, use a bootstrap node:
+If peers are on different networks, run the setup wizard and choose cross-network mode. It prompts for bootstrap and optional relay multiaddrs, then writes:
 
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "bootstrap",
-        "bootstrapList": [
-          "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
-        ]
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "bootstrap",
+          "bootstrapList": [
+            "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
+          ],
+          "relayList": [
+            "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
+          ],
+          "enableNATTraversal": true,
+          "deliveryAckTimeoutMs": 15000
+        }
       }
-    }
-  },
-  "channels": {
-    "libp2p-mesh": {
-      "enabled": true
     }
   }
 }
 ```
+
+### Multiple Inbound Targets
+
+Inbound delivery is owned by the receiving OpenClaw instance. In the setup wizard, choose to add one or more inbound delivery targets. The sender still sends to the receiver's peer ID or instance ID; the receiver decides which local channels display the incoming message.
+
+Example wizard output with two targets:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "inboundTargets": [
+            {
+              "id": "feishu-main",
+              "channel": "feishu",
+              "target": "user:ou_xxx"
+            },
+            {
+              "id": "telegram-main",
+              "channel": "telegram",
+              "target": "chat:123456"
+            }
+          ],
+          "deliveryAckTimeoutMs": 15000
+        }
+      }
+    }
+  }
+}
+```
+
+If `inboundTargets` is an empty array, inbound delivery is disabled. If `inboundTargets` is omitted, the plugin keeps any existing inbound behavior unchanged. When `inboundTargets` is present, it overrides legacy `inboundChannel`/`inboundTarget`.
 
 ### Full Configuration Reference
 
@@ -177,16 +245,20 @@ You need at least one relay node with a public IP. Set it in `relayList`:
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "bootstrap",
-        "bootstrapList": [
-          "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
-        ],
-        "relayList": [
-          "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
-        ]
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "bootstrap",
+          "bootstrapList": [
+            "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
+          ],
+          "relayList": [
+            "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
+          ],
+          "enableNATTraversal": true,
+          "deliveryAckTimeoutMs": 15000
+        }
       }
     }
   }
@@ -202,13 +274,17 @@ Add `enableCircuitRelayServer: true` to your config and announce the public addr
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "bootstrap",
-        "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
-        "announceAddrs": ["/ip4/<PUBLIC-IP>/tcp/4001"],
-        "enableCircuitRelayServer": true
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "bootstrap",
+          "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
+          "announceAddrs": ["/ip4/<PUBLIC-IP>/tcp/4001"],
+          "enableNATTraversal": true,
+          "enableCircuitRelayServer": true,
+          "deliveryAckTimeoutMs": 15000
+        }
       }
     }
   }
@@ -288,23 +364,35 @@ $OPENCLAW_STATE_DIR/libp2p/instance-peer.json
 
 Users do not configure this file path. It is plugin-managed state.
 
-For Feishu inbound display, configure the receiving instance:
+For inbound display, run the setup wizard on the receiving instance and add a target:
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+The wizard edits `plugins.entries["libp2p-mesh"].config` and can add, edit, remove, or disable inbound delivery targets. You do not need to manually edit `openclaw.json`.
+
+Example result for a single Feishu target:
 
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns",
-        "inboundChannel": "feishu",
-        "inboundTarget": "user:ou_xxx",
-        "deliveryAckTimeoutMs": 15000
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "inboundTargets": [
+            {
+              "id": "feishu-main",
+              "channel": "feishu",
+              "target": "user:ou_xxx"
+            }
+          ],
+          "deliveryAckTimeoutMs": 15000
+        }
       }
     }
-  },
-  "channels": {
-    "libp2p-mesh": { "enabled": true }
   }
 }
 ```
@@ -317,23 +405,25 @@ The receiver chooses where inbound P2P messages appear:
 ```json
 {
   "plugins": {
-    "libp2p-mesh": {
-      "enabled": true,
-      "config": {
-        "discovery": "mdns",
-        "inboundTargets": [
-          {
-            "id": "feishu-main",
-            "channel": "feishu",
-            "target": "user:ou_xxx"
-          },
-          {
-            "id": "telegram-main",
-            "channel": "telegram",
-            "target": "chat:123456"
-          }
-        ],
-        "deliveryAckTimeoutMs": 15000
+    "entries": {
+      "libp2p-mesh": {
+        "enabled": true,
+        "config": {
+          "discovery": "mdns",
+          "inboundTargets": [
+            {
+              "id": "feishu-main",
+              "channel": "feishu",
+              "target": "user:ou_xxx"
+            },
+            {
+              "id": "telegram-main",
+              "channel": "telegram",
+              "target": "chat:123456"
+            }
+          ],
+          "deliveryAckTimeoutMs": 15000
+        }
       }
     }
   }
