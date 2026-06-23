@@ -856,6 +856,10 @@ git commit -m "feat: add libp2p mesh setup wizard"
 
 ## 任务 4: OpenClaw CLI 注册与配置写入适配器
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `eb24f52` `feat: register libp2p mesh setup cli`
+
 **Harness（测试框架）:**
 
 - **范围：** 创建 `src/setup-cli.ts` 并修改 `src/plugin.ts`，注册 `openclaw libp2p-mesh setup`。封装 OpenClaw CLI prompter 和 config writer 适配器。不扩展向导行为，不修改 router 或 agent tools。
