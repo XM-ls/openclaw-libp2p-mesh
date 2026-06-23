@@ -297,6 +297,10 @@ git commit -m "feat: add setup config network builder"
 
 ## 任务 2: 多入站目标管理与旧配置迁移
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `f24946d` `feat: add setup inbound target helpers`
+
 **Harness（测试框架）:**
 
 - **范围：** 扩展 `src/setup-config.ts`，实现 channel 候选、target id 生成、重复 target 阻止、`inboundTargets` 添加/编辑/删除/禁用/跳过语义、旧 `inboundChannel/inboundTarget` 迁移。不实现 CLI 交互和配置写入。
