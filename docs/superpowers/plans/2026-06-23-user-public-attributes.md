@@ -242,6 +242,10 @@ git commit -m "feat: add user profile store"
 
 ## 任务 3: USER.md 只读 tag 提取
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `d8a18f9` `feat: extract user public tags from user md`, `dab80b6` `fix: keep user md tag extraction conservative`
+
 **Harness（测试框架）:**
 
 - **范围：** 实现 `USER.md` 只读读取和自由 tag 提取。不能修改 `USER.md`，不能写入 `user-profile.json`，不能调用网络服务。
