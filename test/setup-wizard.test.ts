@@ -67,6 +67,7 @@ test("first run applies LAN config with multiple inbound targets after preview c
   });
 
   assert.equal(result.status, "applied");
+  assert.equal(result.message, "Config updated.\n\nRestart the gateway to apply changes:\nopenclaw gateway restart");
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"], {
     enabled: true,
@@ -82,7 +83,7 @@ test("first run applies LAN config with multiple inbound targets after preview c
   assert.equal(writes[0]?.channels?.["libp2p-mesh"], undefined);
 });
 
-test("existing config edit can add target and keep network mode", async () => {
+test("existing config edit can add target and keep network mode after preview-apply", async () => {
   const { writer, writes } = makeWriter();
   const result = await runSetupWizard({
     currentConfig: {
@@ -112,6 +113,7 @@ test("existing config edit can add target and keep network mode", async () => {
       "telegram",
       "chat:123456",
       "finish-targets",
+      "preview-apply",
       true,
     ]),
   });
@@ -119,6 +121,57 @@ test("existing config edit can add target and keep network mode", async () => {
   assert.equal(result.status, "applied");
   assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
     discovery: "mdns",
+    inboundTargets: [
+      { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+      { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+    ],
+    deliveryAckTimeoutMs: 15000,
+  });
+});
+
+test("existing config edit loops until preview-apply after changing network mode and inbound targets", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+              deliveryAckTimeoutMs: 15000,
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+      },
+    },
+    writer,
+    prompter: makePrompter([
+      "network-mode",
+      "cross-network",
+      "/ip4/203.0.113.10/tcp/4001/p2p/peer",
+      false,
+      "",
+      "inbound-targets",
+      "add-target",
+      "telegram",
+      "chat:123456",
+      "finish-targets",
+      "preview-apply",
+      true,
+    ]),
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
+    discovery: "bootstrap",
+    bootstrapList: ["/ip4/203.0.113.10/tcp/4001/p2p/peer"],
+    enableNATTraversal: true,
     inboundTargets: [
       { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
       { id: "telegram-main", channel: "telegram", target: "chat:123456" },
@@ -158,6 +211,54 @@ test("Ctrl+C cancellation exits without writing", async () => {
     currentConfig: {},
     writer,
     prompter,
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.message, "Configuration cancelled. No changes were written.");
+  assert.equal(writes.length, 0);
+});
+
+test("Ctrl+C cancellation from select exits without writing", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {},
+    writer,
+    prompter: {
+      async confirm() {
+        return true;
+      },
+      async select() {
+        throw new SetupCancelledError();
+      },
+      async input() {
+        throw new Error("input should not be called");
+      },
+      print() {},
+    },
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.message, "Configuration cancelled. No changes were written.");
+  assert.equal(writes.length, 0);
+});
+
+test("Ctrl+C cancellation from input exits without writing", async () => {
+  const { writer, writes } = makeWriter();
+  const result = await runSetupWizard({
+    currentConfig: {},
+    writer,
+    prompter: {
+      async confirm() {
+        return false;
+      },
+      async select() {
+        return "relay-node";
+      },
+      async input() {
+        throw new SetupCancelledError();
+      },
+      print() {},
+    },
   });
 
   assert.equal(result.status, "cancelled");

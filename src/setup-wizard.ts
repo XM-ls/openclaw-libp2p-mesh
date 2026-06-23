@@ -155,14 +155,14 @@ async function runExistingConfigFlow(
       case "network-mode": {
         const mode = await selectSetupMode(options.prompter);
         pluginConfig = mergeNetworkConfig(pluginConfig, await buildNetworkConfigFromPrompts(mode, options.prompter));
-        return pluginConfig;
+        break;
       }
       case "inbound-targets":
         pluginConfig = setInboundTargets(
           pluginConfig,
           await promptForInboundTargets(pluginConfig.inboundTargets ?? [], options, { promptInitialAction: true }),
         );
-        return pluginConfig;
+        break;
       case "preview-apply":
         return pluginConfig;
       case "cancel":
