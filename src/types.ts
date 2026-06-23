@@ -62,11 +62,26 @@ export interface UserMessagePayload {
   };
 }
 
+export interface InboundTargetConfig {
+  id?: string;
+  channel: string;
+  target: string;
+}
+
+export interface DeliveryTargetResult {
+  id?: string;
+  channel: string;
+  target: string;
+  ok: boolean;
+  error?: string;
+}
+
 export interface DeliveryAckPayload {
   ackFor: string;
   ok: boolean;
   inboundChannel?: string;
   inboundTarget?: string;
+  results?: DeliveryTargetResult[];
   deliveredAt: number;
   error?: string;
 }
@@ -138,6 +153,8 @@ export interface InstanceRouter {
     toPeerId: string;
     ackMessageId?: string;
     inboundChannel?: string;
+    inboundTarget?: string;
+    deliveryResults?: DeliveryTargetResult[];
     error?: string;
   }>;
 }
@@ -207,6 +224,7 @@ export interface MeshConfig {
   announceAddrs?: string[];
   inboundChannel?: string;
   inboundTarget?: string;
+  inboundTargets?: InboundTargetConfig[];
   deliveryAckTimeoutMs?: number;
 }
 

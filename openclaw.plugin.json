@@ -34,6 +34,19 @@
           "meshTopic": {
             "type": "string",
             "default": "openclaw-mesh"
+          },
+          "inboundTargets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": { "type": "string" },
+                "channel": { "type": "string" },
+                "target": { "type": "string" }
+              },
+              "required": ["channel", "target"]
+            }
           }
         }
       }
@@ -153,6 +166,20 @@
       "inboundTarget": {
         "type": "string",
         "description": "OpenClaw channel target for inbound P2P user messages, for example user:ou_xxx or chat:oc_xxx."
+      },
+      "inboundTargets": {
+        "type": "array",
+        "description": "OpenClaw channel targets for inbound P2P user messages.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "channel": { "type": "string" },
+            "target": { "type": "string" }
+          },
+          "required": ["channel", "target"]
+        }
       },
       "deliveryAckTimeoutMs": {
         "type": "number",
