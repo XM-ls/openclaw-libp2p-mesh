@@ -11,6 +11,14 @@ const FIELD_PREFIX_PATTERN =
   /^(?:[-*]\s*)?(?:#{1,6}\s*)?(?:name|what to call them|notes?|context|project|projects|skills?|interests?)\s*[:：-]\s*/i;
 const TEMPLATE_PATTERN =
   /\b(?:todo|tbd|n\/a|none|unknown|your name|add notes here|template placeholder|placeholder)\b/i;
+const EXPLICIT_LIST_SEPARATOR_PATTERN = /[,，、;；|/]/;
+const CHINESE_TAG_PATTERN = /[\p{Script=Han}]{2,8}/gu;
+const CHINESE_CONTEXT_PATTERNS = [
+  /(?:在|来自|加入|参与|负责)([\p{Script=Han}]{2,8})(?:做|写|用|项目|团队|实验室|方向)?/gu,
+  /(?:做|写|维护|负责|参与)([\p{Script=Han}]{2,8})(?:项目|插件|工具|方向)?/gu,
+];
+const CHINESE_SENTENCE_WORD_PATTERN =
+  /(?:今天|明天|昨天|今晚|晚上|早上|上午|下午|八点|同步|一下|进展|开会|讨论|安排|提醒|需要|已经|可以|应该|我们|你们|他们)/u;
 const COMMON_WORDS = new Set([
   "and",
   "also",
@@ -66,6 +74,26 @@ function trimChineseCandidate(value: string): string {
     .trim();
 }
 
+function isStableChineseCandidate(value: string): boolean {
+  return (
+    /^[\p{Script=Han}]{2,8}$/u.test(value) &&
+    !CHINESE_SENTENCE_WORD_PATTERN.test(value)
+  );
+}
+
+function collectChineseCandidates(value: string): string[] {
+  const candidates: string[] = [];
+
+  for (const match of value.matchAll(CHINESE_TAG_PATTERN)) {
+    const candidate = trimChineseCandidate(match[0]);
+    if (isStableChineseCandidate(candidate)) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 function looksLikeSentence(value: string): boolean {
   return /[。.!?]/.test(value) || value.split(/\s+/).filter(Boolean).length > 4;
 }
@@ -109,10 +137,22 @@ function collectCandidates(line: string): string[] {
     return candidates;
   }
 
-  for (const match of text.matchAll(/[\p{Script=Han}]{2,16}/gu)) {
-    const value = trimChineseCandidate(match[0]);
-    if (value) {
-      candidates.push(value);
+  if (/^[\p{Script=Han}]{2,8}$/u.test(text) && isStableChineseCandidate(text)) {
+    candidates.push(text);
+  }
+
+  if (EXPLICIT_LIST_SEPARATOR_PATTERN.test(text)) {
+    for (const part of text.split(EXPLICIT_LIST_SEPARATOR_PATTERN)) {
+      candidates.push(...collectChineseCandidates(part));
+    }
+  }
+
+  for (const pattern of CHINESE_CONTEXT_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const value = trimChineseCandidate(match[1] ?? "");
+      if (isStableChineseCandidate(value)) {
+        candidates.push(value);
+      }
     }
   }
 

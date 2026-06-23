@@ -86,6 +86,10 @@ test("extractUserMdTags filters template placeholders and empty profile text", (
   assert.deepEqual(extractUserMdTags(markdown), []);
 });
 
+test("extractUserMdTags does not treat ordinary Chinese notes as public tags", () => {
+  assert.deepEqual(extractUserMdTags("Notes: 今天晚上八点同步一下进展"), []);
+});
+
 test("extractUserMdTags extracts conservative short tags from natural language", () => {
   const tags = extractUserMdTags([
     "# USER",
