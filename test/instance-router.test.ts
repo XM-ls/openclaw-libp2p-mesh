@@ -375,6 +375,52 @@ test("invalid-only inboundTargets omit ack target fields", async () => {
   ]);
 });
 
+test("malformed inboundTargets return target failures instead of throwing", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return {
+        ok: true,
+        channel: request.channel,
+        target: request.target,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("remote-instance", "remote-peer")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        {
+          id: "bad-runtime-config",
+          channel: 123,
+          target: null,
+        },
+      ],
+    } as never,
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  assert.equal(deliveries.length, 0);
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, false);
+  assert.equal(ack.inboundChannel, undefined);
+  assert.equal(ack.inboundTarget, undefined);
+  assert.deepEqual(ack.results, [
+    {
+      id: "bad-runtime-config",
+      channel: "",
+      target: "",
+      ok: false,
+      error: "inbound target channel and target are required",
+    },
+  ]);
+});
+
 test("mixed target results return ok true with every target result", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];

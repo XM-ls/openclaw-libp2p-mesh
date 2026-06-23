@@ -129,6 +129,29 @@ function createLibp2pMeshConfigSchema(): OpenClawPluginConfigSchema {
           type: "string",
           description: "OpenClaw channel target for inbound P2P user messages, for example user:ou_xxx or chat:oc_xxx.",
         },
+        inboundTargets: {
+          type: "array",
+          description: "OpenClaw channel targets used to display inbound P2P user messages. When present, this overrides inboundChannel/inboundTarget. An empty array disables inbound delivery.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: {
+                type: "string",
+                description: "Optional local display name used in logs and delivery ACK output.",
+              },
+              channel: {
+                type: "string",
+                description: "OpenClaw channel used to display this inbound P2P user message, for example \"feishu\".",
+              },
+              target: {
+                type: "string",
+                description: "OpenClaw channel target for this inbound P2P user message, for example user:ou_xxx or chat:oc_xxx.",
+              },
+            },
+            required: ["channel", "target"],
+          },
+        },
         deliveryAckTimeoutMs: {
           type: "number",
           default: 15000,

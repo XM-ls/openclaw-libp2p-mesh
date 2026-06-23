@@ -57,17 +57,17 @@ type EffectiveInboundTarget = {
 };
 
 function displayTargetId(target: {
-  id?: string;
-  channel?: string;
-  target?: string;
+  id?: unknown;
+  channel?: unknown;
+  target?: unknown;
 }): string | undefined {
-  const id = target.id?.trim();
+  const id = typeof target.id === "string" ? target.id.trim() : "";
   return id && id.length > 0 ? id : undefined;
 }
 
 function normalizeConfiguredTarget(target: InboundTargetConfig): EffectiveInboundTarget {
-  const channel = target.channel.trim();
-  const inboundTarget = target.target.trim();
+  const channel = typeof target.channel === "string" ? target.channel.trim() : "";
+  const inboundTarget = typeof target.target === "string" ? target.target.trim() : "";
   const id = displayTargetId(target);
 
   if (!channel || !inboundTarget) {
