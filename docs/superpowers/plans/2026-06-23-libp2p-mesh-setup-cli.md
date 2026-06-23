@@ -1129,6 +1129,10 @@ git commit -m "docs: document libp2p mesh setup cli"
 
 ## 任务 6: 最终验证与计划状态更新
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `this commit` `docs: record libp2p mesh setup cli progress`
+
 **Harness（测试框架）:**
 
 - **范围：** 运行最终验证，更新本计划文件任务状态和提交记录。不修改功能代码。
