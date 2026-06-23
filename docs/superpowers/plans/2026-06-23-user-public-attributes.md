@@ -436,6 +436,10 @@ git commit -m "feat: announce user public attributes"
 
 ## 任务 5: profile CLI 管理结构化属性
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-23
+**Commits:** `c566b72` `feat: add libp2p mesh profile cli`
+
 **Harness（测试框架）:**
 
 - **范围：** 注册 `openclaw libp2p-mesh profile`，实现手动结构化属性的新增、编辑、删除、预览和取消安全。只管理 `user-profile.json`，不修改 `USER.md`，不改 setup 流程。
