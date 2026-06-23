@@ -289,51 +289,83 @@ export function createInstanceRouter(options: {
     }
 
     const targets = effectiveInboundTargets(config);
-    const validTargets = targets.filter((target) => target.valid);
 
     let ack: DeliveryAckPayload;
-    if (validTargets.length === 0) {
+    if (targets.length === 0) {
       ack = {
         ackFor: payload.messageId,
         ok: false,
+        inboundChannel: config.inboundChannel,
+        inboundTarget: config.inboundTarget,
         deliveredAt: Date.now(),
         error: "inbound delivery is not configured",
+        results: [],
       };
-      if (Array.isArray(config.inboundTargets)) {
-        ack.results = [];
-      }
     } else {
-      const target = validTargets[0];
+      const results: DeliveryTargetResult[] = [];
       const metadata = payload.metadata;
-      const result = await delivery.deliver({
-        channel: target.channel,
-        target: target.target,
-        text: payload.text,
-        metadata: {
-          fromInstanceId: payload.fromInstanceId,
-          fromPeerId: msg.from,
-          p2pMessageId: payload.messageId,
-          allowAgentAutoReply: metadata?.allowAgentAutoReply === true,
-          replyToInstanceId: payload.fromInstanceId,
-          replyTool: "p2p_send_instance_message",
-        },
-      });
-      const attempted = firstAttemptedResult([
-        {
-          id: target.id,
-          channel: result.channel,
-          target: result.target,
-          ok: result.ok,
-          error: result.error,
-        },
-      ]);
+
+      for (const target of targets) {
+        if (!target.valid) {
+          results.push({
+            id: target.id,
+            channel: target.channel,
+            target: target.target,
+            ok: false,
+            error: target.error ?? "inbound target channel and target are required",
+          });
+          continue;
+        }
+
+        try {
+          const result = await delivery.deliver({
+            channel: target.channel,
+            target: target.target,
+            text: payload.text,
+            metadata: {
+              fromInstanceId: payload.fromInstanceId,
+              fromPeerId: msg.from,
+              p2pMessageId: payload.messageId,
+              allowAgentAutoReply: metadata?.allowAgentAutoReply === true,
+              replyToInstanceId: payload.fromInstanceId,
+              replyTool: "p2p_send_instance_message",
+            },
+          });
+          results.push({
+            id: target.id,
+            channel: result.channel,
+            target: result.target,
+            ok: result.ok,
+            error: result.error,
+          });
+        } catch (error) {
+          results.push({
+            id: target.id,
+            channel: target.channel,
+            target: target.target,
+            ok: false,
+            error: summarizeError(error),
+          });
+        }
+      }
+
+      const selected = firstAttemptedResult(results);
+      const ok = results.some((result) => result.ok);
+      const deliveryError = ok
+        ? undefined
+        : results
+            .map((result) => result.error)
+            .filter(isNonEmptyString)
+            .join("; ") || "inbound delivery failed";
+
       ack = {
         ackFor: payload.messageId,
-        ok: attempted?.ok ?? false,
-        inboundChannel: attempted?.channel,
-        inboundTarget: attempted?.target,
+        ok,
+        inboundChannel: selected?.channel,
+        inboundTarget: selected?.target,
         deliveredAt: Date.now(),
-        error: attempted?.error,
+        error: deliveryError,
+        results,
       };
     }
 

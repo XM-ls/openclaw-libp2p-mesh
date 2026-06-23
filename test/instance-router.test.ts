@@ -150,6 +150,12 @@ function parseAck(sent: SentMessage[]) {
   return JSON.parse(ack.message.payload);
 }
 
+function parseAcks(sent: SentMessage[]) {
+  return sent
+    .filter((item) => item.message.type === "delivery-ack")
+    .map((item) => JSON.parse(item.message.payload));
+}
+
 test("legacy single-target config still delivers once", async () => {
   const sent: SentMessage[] = [];
   const deliveries: InboundDeliveryRequest[] = [];
@@ -270,4 +276,148 @@ test("empty inboundTargets disables fallback and returns unconfigured failure", 
   assert.equal(ack.ok, false);
   assert.equal(ack.error, "inbound delivery is not configured");
   assert.deepEqual(ack.results, []);
+});
+
+test("mixed target results return ok true with every target result", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      if (request.channel === "telegram") {
+        return {
+          ok: false,
+          channel: request.channel,
+          target: request.target,
+          error: "telegram rejected message",
+        };
+      }
+
+      return {
+        ok: true,
+        channel: request.channel,
+        target: request.target,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("remote-instance", "remote-peer")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        { id: "feishu-primary", channel: "feishu", target: "user:ou_1" },
+        { id: "telegram-alerts", channel: "telegram", target: "chat:123" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  assert.equal(deliveries.length, 2);
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, true);
+  assert.equal(ack.inboundChannel, "feishu");
+  assert.equal(ack.inboundTarget, "user:ou_1");
+  assert.equal(ack.error, undefined);
+  assert.deepEqual(ack.results, [
+    {
+      id: "feishu-primary",
+      channel: "feishu",
+      target: "user:ou_1",
+      ok: true,
+    },
+    {
+      id: "telegram-alerts",
+      channel: "telegram",
+      target: "chat:123",
+      ok: false,
+      error: "telegram rejected message",
+    },
+  ]);
+});
+
+test("all target failures return ok false with all errors", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return {
+        ok: false,
+        channel: request.channel,
+        target: request.target,
+        error: `${request.channel} failed`,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("remote-instance", "remote-peer")]),
+    delivery,
+    config: {
+      inboundTargets: [
+        { id: "feishu-primary", channel: "feishu", target: "user:ou_1" },
+        { id: "telegram-alerts", channel: "telegram", target: "chat:123" },
+      ],
+    },
+  });
+
+  await router.handleMessage(makeUserMessage());
+
+  assert.equal(deliveries.length, 2);
+  const ack = parseAck(sent);
+  assert.equal(ack.ok, false);
+  assert.equal(ack.inboundChannel, "feishu");
+  assert.equal(ack.inboundTarget, "user:ou_1");
+  assert.equal(ack.error, "feishu failed; telegram failed");
+  assert.deepEqual(ack.results, [
+    {
+      id: "feishu-primary",
+      channel: "feishu",
+      target: "user:ou_1",
+      ok: false,
+      error: "feishu failed",
+    },
+    {
+      id: "telegram-alerts",
+      channel: "telegram",
+      target: "chat:123",
+      ok: false,
+      error: "telegram failed",
+    },
+  ]);
+});
+
+test("duplicate messageId reuses cached ACK without repeat delivery", async () => {
+  const sent: SentMessage[] = [];
+  const deliveries: InboundDeliveryRequest[] = [];
+  const delivery: InboundDeliveryAdapter = {
+    async deliver(request) {
+      deliveries.push(request);
+      return {
+        ok: true,
+        channel: request.channel,
+        target: request.target,
+      };
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([makeRecord("remote-instance", "remote-peer")]),
+    delivery,
+    config: {
+      inboundChannel: "feishu",
+      inboundTarget: "user:ou_1",
+    },
+  });
+  const message = makeUserMessage("same-message");
+
+  await router.handleMessage(message);
+  await router.handleMessage(message);
+
+  assert.equal(deliveries.length, 1);
+  const acks = parseAcks(sent);
+  assert.equal(acks.length, 2);
+  assert.deepEqual(acks[0], acks[1]);
 });
