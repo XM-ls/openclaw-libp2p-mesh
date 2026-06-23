@@ -1,16 +1,16 @@
 import type {
   DeliveryAckPayload,
   DeliveryTargetResult,
-  InboundDeliveryAdapter,
   InboundTargetConfig,
   InstanceAnnouncePayload,
-  InstancePeerStore,
   InstanceRouter,
+  InstanceRouterOptions,
   MeshConfig,
-  MeshNetwork,
   P2PMessage,
+  UserPublicAttribute,
   UserMessagePayload,
 } from "./types.js";
+import { mergeUserPublicAttributes } from "./user-attributes.js";
 
 export type RouterLogger = {
   info?: (message: string) => void;
@@ -135,13 +135,7 @@ function firstAttemptedResult(
   );
 }
 
-export function createInstanceRouter(options: {
-  mesh: MeshNetwork;
-  store: InstancePeerStore;
-  delivery: InboundDeliveryAdapter;
-  config?: MeshConfig;
-  logger?: RouterLogger;
-}): InstanceRouter {
+export function createInstanceRouter(options: InstanceRouterOptions): InstanceRouter {
   const { mesh, store, delivery } = options;
   const config = options.config ?? {};
   const logger = options.logger;
@@ -159,7 +153,26 @@ export function createInstanceRouter(options: {
     return identity.id;
   }
 
-  function buildAnnouncePayload(): InstanceAnnouncePayload {
+  async function loadUserPublicAttributes(): Promise<UserPublicAttribute[]> {
+    const [userMdTags, profileAttributes] = await Promise.all([
+      options.userAttributeSource?.loadTags().catch((error) => {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to load USER.md public attributes: ${summarizeError(error)}`,
+        );
+        return [];
+      }) ?? Promise.resolve([]),
+      options.userProfileStore?.listAttributes().catch((error) => {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to load profile public attributes: ${summarizeError(error)}`,
+        );
+        return [];
+      }) ?? Promise.resolve([]),
+    ]);
+
+    return mergeUserPublicAttributes(userMdTags, profileAttributes);
+  }
+
+  async function buildAnnouncePayload(): Promise<InstanceAnnouncePayload> {
     const identity = mesh.getInstanceIdentity();
     if (!identity) {
       throw new Error("Local instance identity is not initialized");
@@ -171,6 +184,7 @@ export function createInstanceRouter(options: {
       instanceName: identity.name,
       multiaddrs: mesh.getMultiaddrs(),
       pubkey: identity.pubkey,
+      userPublicAttributes: await loadUserPublicAttributes(),
       announcedAt: Date.now(),
     };
   }
@@ -180,7 +194,7 @@ export function createInstanceRouter(options: {
       return;
     }
 
-    const payload = buildAnnouncePayload();
+    const payload = await buildAnnouncePayload();
     await mesh.sendStructuredMessage(peerId, {
       id: crypto.randomUUID(),
       type: "instance-announce",

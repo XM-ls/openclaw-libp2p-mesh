@@ -47,6 +47,7 @@ export interface InstanceAnnouncePayload {
   instanceName?: string;
   multiaddrs: string[];
   pubkey?: string;
+  userPublicAttributes?: UserPublicAttribute[];
   announcedAt: number;
 }
 
@@ -111,6 +112,7 @@ export interface InstancePeerRecord {
   instanceName?: string;
   multiaddrs: string[];
   pubkey?: string;
+  userPublicAttributes?: UserPublicAttribute[];
   lastSeenAt: number;
   lastAnnouncedAt: number;
   source: "announce";
@@ -157,6 +159,25 @@ export interface InboundDeliveryResult {
 export interface InboundDeliveryAdapter {
   deliver(request: InboundDeliveryRequest): Promise<InboundDeliveryResult>;
 }
+
+export type InstanceRouterOptions = {
+  mesh: MeshNetwork;
+  store: InstancePeerStore;
+  delivery: InboundDeliveryAdapter;
+  config?: MeshConfig;
+  logger?: {
+    info?: (message: string) => void;
+    debug?: (message: string) => void;
+    warn?: (message: string) => void;
+    error?: (message: string) => void;
+  };
+  userAttributeSource?: {
+    loadTags(): Promise<UserPublicAttribute[]>;
+  };
+  userProfileStore?: {
+    listAttributes(): Promise<UserPublicAttribute[]>;
+  };
+};
 
 export interface InstanceRouter {
   start(): Promise<void>;

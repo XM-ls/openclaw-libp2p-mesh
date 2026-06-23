@@ -9,6 +9,7 @@ import type {
   InstancePeerStore,
   MeshNetwork,
   P2PMessage,
+  UserPublicAttribute,
 } from "../src/types.js";
 
 type SentMessage = {
@@ -209,6 +210,57 @@ test("sendInstanceMessage returns ACK target results to tool layer", async () =>
   assert.equal(result.inboundChannel, "feishu");
   assert.equal(result.inboundTarget, "user:ou_xxx");
   assert.deepEqual(result.deliveryResults, deliveryResults);
+});
+
+test("announceToPeer sends merged USER.md and profile user public attributes", async () => {
+  const sent: SentMessage[] = [];
+  const userMdTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "ResearchLoop",
+    label: "ResearchLoop",
+    source: "USER.md",
+  };
+  const profileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "libp2p-mesh",
+    label: "libp2p-mesh",
+    source: "profile",
+  };
+  const duplicateProfileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: " libp2p-mesh ",
+    label: "duplicate",
+    source: "profile",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    userAttributeSource: {
+      async loadTags() {
+        return [userMdTag];
+      },
+    },
+    userProfileStore: {
+      async listAttributes() {
+        return [profileAttribute, duplicateProfileAttribute];
+      },
+    },
+  });
+
+  await router.announceToPeer("remote-peer");
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].peerId, "remote-peer");
+  assert.equal(sent[0].message.type, "instance-announce");
+  const payload = JSON.parse(sent[0].message.payload);
+  assert.deepEqual(payload.userPublicAttributes, [userMdTag, profileAttribute]);
 });
 
 test("legacy single-target config still delivers once", async () => {

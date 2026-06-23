@@ -6,7 +6,9 @@ import type {
   InstancePeerRecord,
   InstancePeerStore,
   InstancePeerTable,
+  UserPublicAttribute,
 } from "./types.js";
+import { normalizeUserPublicAttribute } from "./user-attributes.js";
 
 export interface StoreLogger {
   info?(message: string): void;
@@ -38,19 +40,48 @@ function sameStringArray(a: string[] = [], b: string[] = []): boolean {
   return a.every((value, index) => value === b[index]);
 }
 
+function normalizeUserPublicAttributes(value: unknown): UserPublicAttribute[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((attribute) => normalizeUserPublicAttribute(attribute))
+    .filter((attribute): attribute is UserPublicAttribute => attribute !== undefined);
+}
+
+function sameUserPublicAttributes(a: UserPublicAttribute[] = [], b: UserPublicAttribute[] = []): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((attribute, index) => {
+    const other = b[index];
+    return JSON.stringify(attribute) === JSON.stringify(other);
+  });
+}
+
 function sameRecord(
   record: InstancePeerRecord | undefined,
   payload: InstanceAnnouncePayload,
 ): boolean {
   if (!record) return false;
 
+  const recordAttributes = normalizeUserPublicAttributes(record.userPublicAttributes);
+  const payloadAttributes = normalizeUserPublicAttributes(payload.userPublicAttributes);
+
   return (
     record.peerId === payload.peerId &&
     record.instanceName === payload.instanceName &&
     record.pubkey === payload.pubkey &&
     sameStringArray(record.multiaddrs, payload.multiaddrs) &&
+    sameUserPublicAttributes(recordAttributes, payloadAttributes) &&
     record.lastAnnouncedAt === payload.announcedAt
   );
+}
+
+function normalizeRecord(value: InstancePeerRecord): InstancePeerRecord {
+  return {
+    ...value,
+    userPublicAttributes: normalizeUserPublicAttributes(value.userPublicAttributes),
+  };
 }
 
 function normalizeTable(value: unknown): InstancePeerTable {
@@ -61,10 +92,17 @@ function normalizeTable(value: unknown): InstancePeerTable {
       ? table.instances
       : {};
 
+  const normalizedInstances: Record<string, InstancePeerRecord> = {};
+  for (const [instanceId, record] of Object.entries(instances)) {
+    if (record && typeof record === "object") {
+      normalizedInstances[instanceId] = normalizeRecord(record as InstancePeerRecord);
+    }
+  }
+
   return {
     version: 1,
     updatedAt: typeof table.updatedAt === "number" ? table.updatedAt : Date.now(),
-    instances: instances as Record<string, InstancePeerRecord>,
+    instances: normalizedInstances,
   };
 }
 
@@ -149,6 +187,7 @@ export function createInstancePeerStore(options?: {
       return runMutation(async () => {
         const table = await load();
         const existing = table.instances[payload.instanceId];
+        const userPublicAttributes = normalizeUserPublicAttributes(payload.userPublicAttributes);
         const changed = !sameRecord(existing, payload);
         const record: InstancePeerRecord = {
           instanceId: payload.instanceId,
@@ -156,6 +195,7 @@ export function createInstancePeerStore(options?: {
           instanceName: payload.instanceName,
           pubkey: payload.pubkey,
           multiaddrs: payload.multiaddrs,
+          userPublicAttributes,
           lastAnnouncedAt: payload.announcedAt,
           lastSeenAt: Date.now(),
           source: "announce",
