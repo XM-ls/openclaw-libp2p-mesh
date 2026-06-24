@@ -102,6 +102,11 @@ export type UserPublicAttribute =
       source: "profile";
     };
 
+export type UserMdAttributeSource = {
+  loadTags(): Promise<UserPublicAttribute[]>;
+  refreshTags?(): Promise<UserPublicAttribute[]>;
+};
+
 export type LocalPeerLabel = {
   key: string;
   value: string;
@@ -232,9 +237,7 @@ export type InstanceRouterOptions = {
     warn?: (message: string) => void;
     error?: (message: string) => void;
   };
-  userAttributeSource?: {
-    loadTags(): Promise<UserPublicAttribute[]>;
-  };
+  userAttributeSource?: UserMdAttributeSource;
   userProfileStore?: {
     listAttributes(): Promise<UserPublicAttribute[]>;
   };
