@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import type { UserPublicAttribute } from "./types.js";
@@ -58,6 +59,19 @@ export type UserMdAttributeSource = {
     warn?: (message: string) => void;
   };
 };
+
+export function resolveUserMdPath(customPath?: string): string {
+  if (customPath) {
+    return customPath;
+  }
+
+  const stateDir = process.env.OPENCLAW_STATE_DIR;
+  if (stateDir) {
+    return path.join(stateDir, "workspace", "USER.md");
+  }
+
+  return path.join(homedir(), ".openclaw", "workspace", "USER.md");
+}
 
 function isTemplateText(value: string): boolean {
   const trimmed = value.trim();
@@ -236,7 +250,7 @@ export function extractUserMdTags(markdown: string): UserPublicAttribute[] {
 export function createUserMdAttributeSource(options?: UserMdAttributeSource): {
   loadTags(): Promise<UserPublicAttribute[]>;
 } {
-  const filePath = options?.path ?? path.join(process.cwd(), "USER.md");
+  const filePath = resolveUserMdPath(options?.path);
   const logger = options?.logger;
 
   return {

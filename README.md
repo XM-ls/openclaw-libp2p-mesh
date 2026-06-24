@@ -476,6 +476,18 @@ There are two sources:
 - `USER.md` tags are extracted read-only at gateway startup. The plugin never edits `USER.md`.
 - `user-profile.json` stores manually managed structured attributes such as group, project, role, skill, or a custom key.
 
+By default, `USER.md` is read from:
+
+```text
+~/.openclaw/workspace/USER.md
+```
+
+When `OPENCLAW_STATE_DIR` is set, the plugin reads:
+
+```text
+$OPENCLAW_STATE_DIR/workspace/USER.md
+```
+
 Run the profile wizard to manage structured attributes:
 
 ```bash

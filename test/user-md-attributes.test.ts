@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import {
   createUserMdAttributeSource,
   extractUserMdTags,
+  resolveUserMdPath,
 } from "../src/user-md-attributes.js";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -17,6 +18,68 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("resolveUserMdPath uses the OpenClaw workspace USER.md by default", () => {
+  const previous = process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENCLAW_STATE_DIR;
+  try {
+    assert.equal(
+      resolveUserMdPath(),
+      path.join(homedir(), ".openclaw", "workspace", "USER.md"),
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previous;
+    }
+  }
+});
+
+test("resolveUserMdPath uses OPENCLAW_STATE_DIR workspace when configured", async () => {
+  await withTempDir(async (dir) => {
+    const previous = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = dir;
+    try {
+      assert.equal(resolveUserMdPath(), path.join(dir, "workspace", "USER.md"));
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previous;
+      }
+    }
+  });
+});
+
+test("resolveUserMdPath prefers an explicit path", () => {
+  assert.equal(resolveUserMdPath("/tmp/custom-USER.md"), "/tmp/custom-USER.md");
+});
+
+test("loadTags reads the default OpenClaw workspace USER.md path", async () => {
+  await withTempDir(async (dir) => {
+    const previous = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = dir;
+    try {
+      const filePath = path.join(dir, "workspace", "USER.md");
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, "Name: ypp\nProjects: ResearchLoop, OpenClaw\n", "utf8");
+
+      const source = createUserMdAttributeSource();
+      const tags = await source.loadTags();
+
+      assert.ok(tags.some((tag) => tag.value === "ypp"));
+      assert.ok(tags.some((tag) => tag.value === "ResearchLoop"));
+      assert.ok(tags.some((tag) => tag.value === "OpenClaw"));
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previous;
+      }
+    }
+  });
+});
 
 test("loadTags returns no tags when USER.md does not exist", async () => {
   await withTempDir(async (dir) => {
