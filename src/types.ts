@@ -102,6 +102,33 @@ export type UserPublicAttribute =
       source: "profile";
     };
 
+export type LocalPeerLabel = {
+  key: string;
+  value: string;
+};
+
+export type LocalPeerLabelAttribute = {
+  kind: "structured";
+  key: string;
+  value: string;
+  label: string;
+  source: "local";
+};
+
+export type PeerLabelsFile = {
+  version: 1;
+  updatedAt: number;
+  peers: Record<string, { labels: LocalPeerLabel[] }>;
+};
+
+export type PeerLabelStore = {
+  load(): Promise<PeerLabelsFile>;
+  save(file: PeerLabelsFile): Promise<PeerLabelsFile>;
+  listRawLabels(instanceId: string): Promise<LocalPeerLabel[]>;
+  listLabels(instanceId: string): Promise<LocalPeerLabelAttribute[]>;
+  replaceLabels(instanceId: string, labels: LocalPeerLabel[]): Promise<PeerLabelsFile>;
+};
+
 export type UserAttributeMatch =
   | { kind: "tag"; value: string }
   | { kind: "structured"; key: string; value: string };
