@@ -1,41 +1,34 @@
-# Async Agent USER.md Attribute Extraction Design
+# 异步 Agent 提取 USER.md 公开属性设计
 
-## Context
+## 背景
 
-The current plugin extracts public USER.md tags with local code heuristics in
-`src/user-md-attributes.ts`. This works for simple technical tokens such as
-`P2P`, but it can also publish weak or irrelevant tags from natural language,
-for example `专注于`, `了解`, or `随时告诉我`.
+当前插件在 `src/user-md-attributes.ts` 中使用本地启发式代码从 USER.md
+提取公开 tag。这个方式能识别 `P2P` 这类简单技术词，但也会从自然语言中发布一些价值较低或无关的 tag，例如 `专注于`、`了解`、`随时告诉我`。
 
-The desired behavior is to let OpenClaw use the user's configured agent/API
-model to extract more precise public attributes, while keeping libp2p discovery
-fast and reliable.
+期望行为是：让 OpenClaw 使用用户已经配置好的 agent/API 模型来提取更精准的公开属性，同时不影响 libp2p 节点发现和连接速度。
 
-## Goals
+## 目标
 
-- Do not block peer discovery or connection setup on model calls.
-- Use the OpenClaw-configured agent/model path for USER.md extraction.
-- Keep libp2p-mesh from storing provider API keys or selecting models directly.
-- Preserve the existing `instance-announce` upsert model.
-- Keep `user-profile.json` manual attributes and USER.md-derived tags in one
-  public attribute snapshot.
-- Make model failure non-fatal.
-- Update agent-facing prompt guidance so tools interpret public and local
-  attributes correctly.
+- peer 发现和连接建立不被模型调用阻塞。
+- USER.md 属性提取走 OpenClaw 已配置的 agent/model 路径。
+- libp2p-mesh 不保存模型供应商 API key，也不直接选择模型。
+- 保留现有 `instance-announce` 按 `instanceId` upsert 的模型。
+- 将 `user-profile.json` 手动属性和 USER.md 提取 tag 合并为同一个公开属性快照。
+- 模型调用失败不影响联网。
+- 更新面向 agent 的 prompt 说明，让工具正确区分公开属性和本地标签。
 
-## Non-Goals
+## 非目标
 
-- Add a separate attribute-delta protocol message.
-- Let ordinary conversation agents read USER.md and decide what to publish.
-- Add first-version per-plugin model override settings.
-- Change local peer labels or `scope="local"` behavior.
+- 不新增单独的属性 delta 协议消息。
+- 不让普通对话 agent 自己读取 USER.md 并决定发布什么属性。
+- 第一版不增加插件级模型 override 配置。
+- 不改变本地 peer labels 或 `scope="local"` 的行为。
 
-## Recommended Flow
+## 推荐流程
 
-### 1. Send a Fast Base Announce
+### 1. 先发送快速基础 announce
 
-When the gateway starts or connects to a peer, it immediately sends a normal
-`instance-announce` with identity and network fields only:
+gateway 启动或连接 peer 时，立即发送普通 `instance-announce`，只包含身份和网络字段：
 
 ```json
 {
@@ -48,44 +41,32 @@ When the gateway starts or connects to a peer, it immediately sends a normal
 }
 ```
 
-The base announce omits `userPublicAttributes`. It must not send an empty array
-as a placeholder, because an absent field means "attributes were not included in
-this announce", while an empty array means "the current public attribute
-snapshot is intentionally empty."
+基础 announce 省略 `userPublicAttributes` 字段。不要用空数组占位，因为字段缺失表示“这次 announce 没有携带属性”，而空数组表示“当前公开属性快照明确为空”。
 
-### 2. Extract USER.md Attributes Asynchronously
+### 2. 异步提取 USER.md 属性
 
-After base announce, the gateway starts an asynchronous refresh job:
+基础 announce 发出后，gateway 启动一个异步刷新任务：
 
-1. Read `~/.openclaw/workspace/USER.md` or the `OPENCLAW_STATE_DIR` equivalent.
-2. Compute a stable content hash.
-3. If the hash matches a valid cache entry, reuse cached USER.md attributes.
-4. If the hash changed, call the OpenClaw runtime's configured agent/model
-   extraction capability.
-5. Validate the returned JSON attributes.
-6. Store the validated result in a cache file, keyed by USER.md hash.
+1. 读取 `~/.openclaw/workspace/USER.md`，或 `OPENCLAW_STATE_DIR` 下对应的 USER.md。
+2. 计算稳定的内容 hash。
+3. 如果 hash 命中有效缓存，复用缓存中的 USER.md 属性。
+4. 如果 hash 发生变化，调用 OpenClaw runtime 已配置的 agent/model 提取能力。
+5. 校验返回的 JSON 属性。
+6. 将校验后的结果按 USER.md hash 写入缓存文件。
 
-The plugin should request extraction through an OpenClaw runtime capability. It
-should not read provider credentials, choose providers, or call OpenAI-compatible
-APIs directly. By default, extraction uses the current OpenClaw configured
-agent/API model.
+插件应通过 OpenClaw runtime 能力请求提取。它不应读取模型供应商凭证、不应选择模型供应商，也不应直接调用 OpenAI-compatible API。默认情况下，提取使用当前 OpenClaw 配置的 agent/API 模型。
 
-The first implementation should introduce a small injectable extractor
-interface. Production wiring calls the OpenClaw runtime capability when it is
-available. Tests can inject a deterministic extractor. If the current OpenClaw
-SDK does not yet expose the needed runtime method, production wiring should
-return "unavailable" and skip USER.md-derived tags instead of calling model
-providers directly.
+第一版应在 libp2p-mesh 内定义一个小的可注入提取器接口。生产环境接线在 OpenClaw runtime 能力可用时调用它；测试可以注入确定性的提取器。如果当前 OpenClaw SDK 还没有暴露所需 runtime 方法，生产环境接线应返回“不可用”，并跳过 USER.md 派生 tag，而不是直接调用模型供应商。
 
-### 3. Merge USER.md Tags and Profile Attributes
+### 3. 合并 USER.md tag 和 profile 属性
 
-After USER.md extraction completes, rebuild the public attribute snapshot:
+USER.md 提取完成后，重建公开属性快照：
 
-- USER.md extracted tags use `source: "USER.md"`.
-- `user-profile.json` structured attributes use `source: "profile"`.
-- Existing normalization and dedupe rules still apply.
+- USER.md 提取出来的 tag 使用 `source: "USER.md"`。
+- `user-profile.json` 中的结构化属性使用 `source: "profile"`。
+- 继续使用现有 normalization 和去重规则。
 
-Example snapshot:
+示例快照：
 
 ```json
 [
@@ -100,11 +81,9 @@ Example snapshot:
 ]
 ```
 
-### 4. Broadcast a Full Attribute Announce
+### 4. 广播完整属性 announce
 
-When the merged snapshot is ready, send another complete `instance-announce`.
-This second announce includes all identity/network fields and the complete
-`userPublicAttributes` snapshot:
+合并后的属性快照准备好后，再发送一次完整 `instance-announce`。第二次 announce 仍然包含所有身份和网络字段，并携带完整 `userPublicAttributes` 快照：
 
 ```json
 {
@@ -127,89 +106,67 @@ This second announce includes all identity/network fields and the complete
 }
 ```
 
-Receivers continue to upsert by `instanceId`. This keeps the protocol
-idempotent, handles deletion naturally by replacing the whole snapshot, and
-avoids new delta merge rules.
+接收方继续按 `instanceId` upsert。这保持了协议幂等性，也能自然表达属性删除：新的完整快照直接替换旧快照，不需要新增 delta 合并规则。
 
-### 5. Refresh After Profile Changes
+### 5. profile 变化后的刷新
 
-When a user runs:
+用户运行：
 
 ```bash
 openclaw libp2p-mesh profile
 ```
 
-and saves changes to `user-profile.json`, the gateway should refresh public
-attributes and rebroadcast a full `instance-announce` snapshot. The refresh uses
-cached USER.md extraction when the USER.md hash has not changed, then merges the
-new profile attributes.
+并保存 `user-profile.json` 变化后，gateway 应刷新公开属性并重新广播完整 `instance-announce` 快照。刷新时如果 USER.md hash 没变，则复用缓存的 USER.md 提取结果，然后合并新的 profile 属性。
 
-The first implementation should refresh immediately when the profile command
-runs in the same plugin runtime as the gateway. If the CLI process cannot reach
-the running gateway, the saved profile still takes effect on the next startup,
-peer connection, or scheduled attribute refresh. This keeps profile updates
-eventually consistent without requiring a new cross-process control channel in
-the first version.
+第一版中，如果 profile 命令和 gateway 运行在同一个 plugin runtime 内，应立即刷新。如果 CLI 进程无法通知正在运行的 gateway，保存后的 profile 仍会在下一次启动、peer 连接或定时属性刷新时生效。这样第一版不需要新增跨进程控制通道，也能保证最终一致。
 
-## Validation and Safety
+## 校验与安全
 
-Model output must be treated as untrusted data:
+模型输出必须被当作不可信数据处理：
 
-- Parse only strict JSON.
-- Accept only `UserPublicAttribute[]`-compatible entries.
-- For USER.md extraction, accept only tag attributes in the first version.
-- Enforce max count and max value length.
-- Drop empty, sentence-like, duplicate, or schema-invalid values.
-- Normalize values using existing `user-attributes.ts` helpers.
-- Never allow model output to set `source: "profile"`.
-- Never fail peer connection because extraction failed.
+- 只解析严格 JSON。
+- 只接受兼容 `UserPublicAttribute[]` 的条目。
+- 第一版 USER.md 提取只接受 tag 属性。
+- 限制最大数量和最大 value 长度。
+- 丢弃空值、像句子的值、重复值或 schema 无效值。
+- 使用现有 `user-attributes.ts` helper 做 normalization。
+- 绝不允许模型输出设置 `source: "profile"`。
+- 绝不因为提取失败而影响 peer 连接。
 
-On extraction failure, log a warning and use the best available fallback:
+提取失败时，记录 warning，并使用可用的最佳降级结果：
 
-1. Existing valid USER.md extraction cache for the same file hash, if present.
-2. No USER.md tags.
+1. 如果同一个文件 hash 已有有效 USER.md 提取缓存，则使用缓存。
+2. 否则不发布 USER.md tag。
 
-Profile attributes should still be included when available.
+profile 属性只要可用，仍应正常包含在公开属性快照中。
 
-The current heuristic extractor should remain only as a local implementation
-utility until it is replaced, but the async agent extraction flow should not use
-heuristic USER.md tags as its public fallback. This avoids publishing the same
-low-value tags the feature is meant to remove.
+当前启发式提取器可以暂时保留为本地实现工具，直到被替换；但异步 agent 提取流程不应把启发式 USER.md tag 作为公开降级结果。这样可以避免继续发布本功能想要消除的低价值 tag。
 
-## Prompt Guidance Changes
+## Prompt 说明变更
 
-`src/prompt-config.ts` should be updated to explain the new behavior:
+`src/prompt-config.ts` 应更新说明新行为：
 
-- `source="USER.md"` means gateway asynchronously extracted public tags from
-  USER.md using the OpenClaw-configured agent/API model.
-- `source="profile"` means the user manually configured public structured
-  attributes with `openclaw libp2p-mesh profile`.
-- A base announce may omit `userPublicAttributes`; this means attributes were
-  not included in that announce, not necessarily that the user has no public
-  attributes.
-- `scope="public"` matches remote `userPublicAttributes`, including USER.md
-  extracted tags and profile attributes.
-- `scope="local"` matches only local labels from `openclaw libp2p-mesh labels`.
-- `scope="all"` matches both public attributes and local labels.
-- Ordinary conversation agents should not read USER.md themselves to decide
-  public attributes. Extraction is a gateway background responsibility.
+- `source="USER.md"` 表示 gateway 使用 OpenClaw 已配置的 agent/API 模型，从 USER.md 异步提取并公开广播的 tag。
+- `source="profile"` 表示用户通过 `openclaw libp2p-mesh profile` 手动配置的公开结构化属性。
+- 基础 announce 可能省略 `userPublicAttributes`；这表示本次 announce 没有携带属性，不一定表示该用户没有公开属性。
+- `scope="public"` 匹配远端 `userPublicAttributes`，包括 USER.md 提取 tag 和 profile 属性。
+- `scope="local"` 只匹配 `openclaw libp2p-mesh labels` 配置的本地标签。
+- `scope="all"` 同时匹配公开属性和本地标签。
+- 普通对话 agent 不应自己读取 USER.md 来决定公开属性。属性提取是 gateway 后台职责。
 
-## Testing Strategy
+## 测试策略
 
-- Unit test base announce construction omits `userPublicAttributes`.
-- Unit test asynchronous refresh sends a second full announce with merged
-  attributes.
-- Unit test USER.md hash cache avoids repeated extractor calls.
-- Unit test extractor failure does not block base announce.
-- Unit test invalid model output is dropped.
-- Unit test profile changes rebuild and rebroadcast the full snapshot.
-- Prompt tests should assert the updated source and scope guidance.
+- 单元测试基础 announce 构造时省略 `userPublicAttributes`。
+- 单元测试异步刷新会发送第二次完整 announce，并包含合并后的属性。
+- 单元测试 USER.md hash 缓存能避免重复调用提取器。
+- 单元测试提取器失败不阻塞基础 announce。
+- 单元测试无效模型输出会被丢弃。
+- 单元测试 profile 变化会重建并重新广播完整快照。
+- prompt 测试应断言更新后的 source 和 scope 说明。
 
-## First-Version Decisions
+## 第一版决策
 
-- Define a local injectable extractor interface inside libp2p-mesh and wire it
-  to an OpenClaw runtime extraction capability when available.
-- Do not add direct provider API calls or plugin-owned model credentials.
-- Do not publish heuristic USER.md tags as the async extraction fallback.
-- Keep profile updates eventually consistent when the CLI cannot notify the
-  running gateway process.
+- 在 libp2p-mesh 内定义本地可注入提取器接口，并在 OpenClaw runtime 提取能力可用时接入。
+- 不增加直接模型供应商 API 调用，也不保存插件自己的模型凭证。
+- 异步提取不可用时，不发布启发式 USER.md tag 作为降级结果。
+- 当 CLI 无法通知运行中的 gateway 进程时，profile 更新保持最终一致。
