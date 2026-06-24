@@ -227,7 +227,8 @@ test("send user attribute tool exposes selector schema and allows sending immedi
   assert.match(tool.description, /dry run/i);
   assert.doesNotMatch(tool.description, /confirm/i);
   assert.equal(tool.parameters.type, "object");
-  assert.deepEqual(tool.parameters.required, ["selector", "message"]);
+  assert.deepEqual(tool.parameters.required, ["message"]);
+  assert.deepEqual(tool.parameters.anyOf, [{ required: ["selector"] }, { required: ["match"] }]);
   assert.ok(tool.parameters.properties.selector);
   assert.ok(tool.parameters.properties.match);
   assert.ok(tool.parameters.properties.message);

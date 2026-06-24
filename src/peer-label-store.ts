@@ -184,7 +184,7 @@ export function createPeerLabelStore(options?: {
   }
 
   async function listRawLabels(instanceId: string): Promise<LocalPeerLabel[]> {
-    const file = cached ?? (await load());
+    const file = await load();
     return [...(file.peers[instanceId]?.labels ?? [])];
   }
 

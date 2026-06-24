@@ -574,7 +574,8 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
               "Attribute source to match: public announced attributes, local peer labels, or both. Defaults to public.",
           },
         },
-        required: ["selector", "message"],
+        required: ["message"],
+        anyOf: [{ required: ["selector"] }, { required: ["match"] }],
       },
       async execute(_toolCallId: string, params: SendUserAttributeToolParams) {
         if (!router) {

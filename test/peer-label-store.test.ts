@@ -136,6 +136,22 @@ test("listRawLabels returns normalized key value labels for an instance", async 
   });
 });
 
+test("listLabels reloads labels written by another store instance", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = path.join(dir, "libp2p", "peer-labels.json");
+    const runningStore = createPeerLabelStore({ path: filePath });
+    const cliStore = createPeerLabelStore({ path: filePath });
+
+    assert.deepEqual(await runningStore.listRawLabels("alice@abc.111"), []);
+
+    await cliStore.replaceLabels("alice@abc.111", [{ key: "group", value: "实验室" }]);
+
+    assert.deepEqual(await runningStore.listLabels("alice@abc.111"), [
+      { kind: "structured", key: "group", value: "实验室", label: "实验室", source: "local" },
+    ]);
+  });
+});
+
 test("replaceLabels and listLabels persist local structured attributes", async () => {
   await withTempDir(async (dir) => {
     const store = createPeerLabelStore({
