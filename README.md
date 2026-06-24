@@ -471,7 +471,7 @@ Tools are not configured in `openclaw.json`; they are registered automatically b
 
 `libp2p-mesh` can announce user public attributes with instance route announcements. These attributes help agents find matching OpenClaw instances after those instances have already been discovered through the mesh.
 
-There are two sources:
+There are two public sources:
 
 - `USER.md` tags are extracted read-only at gateway startup. The plugin never edits `USER.md`.
 - `user-profile.json` stores manually managed structured attributes such as group, project, role, skill, or a custom key.
@@ -568,31 +568,96 @@ Remote attributes are cached in plugin-managed instance state under `instance-pe
 }
 ```
 
-Use `p2p_send_user_attribute_message` for attribute-based group messages. Always dry-run first, review the matched instances with the user, then send only after confirmation:
+### Local peer labels
+
+Use local peer labels when you want to classify remote instances privately on this machine:
+
+```bash
+openclaw libp2p-mesh labels
+```
+
+The default labels path is:
+
+```text
+~/.openclaw/libp2p/peer-labels.json
+```
+
+When `OPENCLAW_STATE_DIR` is set:
+
+```text
+$OPENCLAW_STATE_DIR/libp2p/peer-labels.json
+```
+
+Example `peer-labels.json`:
+
+```json
+{
+  "version": 1,
+  "updatedAt": 1782180000000,
+  "peers": {
+    "alice-mac@AQIDBAUGBweI.7a3f9e2b": {
+      "labels": [
+        { "key": "group", "value": "实验室" },
+        { "key": "project", "value": "openclaw" }
+      ]
+    }
+  }
+}
+```
+
+Privacy boundary: `peer-labels.json` is local state for your gateway. It is not announced to peers, not written into remote `instance-peer.json.userPublicAttributes`, and not visible to the remote user through the mesh protocol. Public attributes in `USER.md` and `user-profile.json` are still broadcast with instance announce messages.
+
+Use `p2p_send_user_attribute_message` for attribute-based group messages. It defaults to public attributes only, equivalent to `scope="public"`. Always dry-run first. If the dry run matches targets, call the same tool again immediately with the same selector, scope, message, and `dryRun: false`.
+
+Public scope matches attributes that remote instances announced from their own `USER.md` or `user-profile.json`:
 
 ```text
 p2p_send_user_attribute_message({
-  "match": { "kind": "structured", "key": "project", "value": "openclaw" },
+  "selector": "project=openclaw",
   "message": "今晚同步一下进展",
+  "scope": "public",
   "dryRun": true
 })
 ```
 
-After confirming the dry-run targets:
+After a matching dry run:
 
 ```text
 p2p_send_user_attribute_message({
-  "match": { "kind": "structured", "key": "project", "value": "openclaw" },
+  "selector": "project=openclaw",
   "message": "今晚同步一下进展",
+  "scope": "public",
   "dryRun": false
 })
 ```
 
-Tag matches use only the tag value:
+Local scope, written as `scope="local"` in prompt instructions or `"scope": "local"` in tool JSON, matches only labels from your `peer-labels.json`:
 
 ```text
 p2p_send_user_attribute_message({
-  "match": { "kind": "tag", "value": "libp2p" },
+  "selector": "group=实验室",
+  "message": "我按本地归类发一个提醒",
+  "scope": "local",
+  "dryRun": true
+})
+```
+
+All scope matches both sources and deduplicates by instance:
+
+```text
+p2p_send_user_attribute_message({
+  "selector": "project=openclaw",
+  "message": "公开属性和本地标签都算",
+  "scope": "all",
+  "dryRun": true
+})
+```
+
+Selectors use `key=value` for structured profile attributes or local labels. Tag matches use `tag:value` or `#value` for public `USER.md` tags. Bare selectors such as `实验室` are rejected because they are ambiguous; use `group=实验室` for a structured group or `tag:实验室` for a USER.md tag.
+
+```text
+p2p_send_user_attribute_message({
+  "selector": "#libp2p",
   "message": "libp2p 方向有个问题想确认",
   "dryRun": true
 })

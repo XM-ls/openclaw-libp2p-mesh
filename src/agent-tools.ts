@@ -514,7 +514,7 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
       name: "p2p_send_user_attribute_message",
       label: "P2P Send User Attribute Message",
       description:
-        'Send a user message to discovered OpenClaw instances matching a public user attribute selector. Use selectors like "group=实验室", "project=小龙虾", "tag:P2P", or "#P2P". First run a dry run with dryRun=true to preview targets; if targets match, call again immediately with dryRun=false and the same selector.',
+        'Send a user message to discovered OpenClaw instances matching an attribute selector. scope controls the source: "public" for announced user attributes, "local" for local peer labels, or "all" for both; defaults to public. Use selectors like "group=实验室", "project=小龙虾", "tag:P2P", or "#P2P". First run a dry run with dryRun=true to preview targets; if targets match, call again immediately with dryRun=false and the same selector, scope, and message.',
       parameters: {
         type: "object" as const,
         properties: {
@@ -571,7 +571,7 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
             type: "string" as const,
             enum: ["public", "local", "all"],
             description:
-              "Attribute source to match: public announced attributes, local peer labels, or both.",
+              "Attribute source to match: public announced attributes, local peer labels, or both. Defaults to public.",
           },
         },
         required: ["selector", "message"],

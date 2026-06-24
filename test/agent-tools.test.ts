@@ -232,11 +232,13 @@ test("send user attribute tool exposes selector schema and allows sending immedi
   assert.ok(tool.parameters.properties.match);
   assert.ok(tool.parameters.properties.message);
   assert.ok(tool.parameters.properties.dryRun);
+  assert.match(tool.description, /scope/i);
+  assert.match(tool.description, /default(?:s)? to public/i);
   assert.deepEqual(tool.parameters.properties.scope, {
     type: "string",
     enum: ["public", "local", "all"],
     description:
-      "Attribute source to match: public announced attributes, local peer labels, or both.",
+      "Attribute source to match: public announced attributes, local peer labels, or both. Defaults to public.",
   });
 });
 
