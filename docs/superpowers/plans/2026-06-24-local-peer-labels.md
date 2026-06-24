@@ -50,6 +50,10 @@
 
 ### 任务 1: PeerLabelStore 本地标签存储
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `5b763da` `feat: add local peer label store`
+
 **Harness（测试框架）:**
 
 - **范围：** 只实现 `peer-labels.json` 的纯本地存储、规范化和查询；不注册 CLI，不接入 router，不改 agent tool。
