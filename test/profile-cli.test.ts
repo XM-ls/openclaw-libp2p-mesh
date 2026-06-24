@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { registerLibp2pMesh } from "../src/plugin.js";
 import { registerLibp2pMeshCli } from "../src/profile-cli.js";
 import type { SetupPrompter } from "../src/setup-wizard.js";
-import type { UserPublicAttribute } from "../src/types.js";
+import type { InstancePeerRecord, LocalPeerLabel, UserPublicAttribute } from "../src/types.js";
 
 type FakeCommand = {
   name: string;
@@ -95,7 +95,7 @@ function makePrompter(script: Array<string | boolean>, printed: string[] = []): 
   };
 }
 
-test("registerLibp2pMeshCli registers setup profile and debug under one libp2p-mesh root command", () => {
+test("registerLibp2pMeshCli registers setup profile labels and debug under one libp2p-mesh root command", () => {
   const root = makeCommand("openclaw");
   const { api, registrations } = makeApi(root);
 
@@ -118,6 +118,20 @@ test("registerLibp2pMeshCli registers setup profile and debug under one libp2p-m
         },
       }),
     },
+    labels: {
+      createPrompter: () => makePrompter(["instance-index-0", "save-finish"]),
+      createPeerStore: () => ({
+        async list() {
+          return [];
+        },
+      }),
+      createPeerLabelStore: () => ({
+        async listRawLabels() {
+          return [];
+        },
+        async replaceLabels() {},
+      }),
+    },
     debug: {
       createPrompter: () => makePrompter(["summary"]),
     },
@@ -127,6 +141,7 @@ test("registerLibp2pMeshCli registers setup profile and debug under one libp2p-m
   assert.equal(libp2pRoots.length, 1);
   assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "setup"));
   assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "profile"));
+  assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "labels"));
   assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "debug"));
   assert.deepEqual(registrations[0]?.opts, {
     commands: ["libp2p-mesh"],
@@ -134,6 +149,59 @@ test("registerLibp2pMeshCli registers setup profile and debug under one libp2p-m
       { name: "libp2p-mesh", description: "Configure libp2p-mesh plugin.", hasSubcommands: true },
     ],
   });
+});
+
+test("labels command action loads discovered instances and replaces local labels for the selected instance", async () => {
+  const root = makeCommand("openclaw");
+  const printed: string[] = [];
+  const writes: Array<{ instanceId: string; labels: LocalPeerLabel[] }> = [];
+  const { api } = makeApi(root);
+  const instances: InstancePeerRecord[] = [
+    {
+      instanceId: "alice@abc.111",
+      peerId: "peer-alice",
+      instanceName: "Alice laptop",
+      multiaddrs: [],
+      userPublicAttributes: [],
+      lastSeenAt: 2,
+      lastAnnouncedAt: 1,
+      source: "announce",
+    },
+  ];
+  let closeCount = 0;
+
+  registerLibp2pMeshCli(api, {
+    labels: {
+      createPrompter: () => ({
+        ...makePrompter(["instance-index-0", "add-label", "group", "实验室", "save-finish"], printed),
+        close() {
+          closeCount += 1;
+        },
+      }),
+      createPeerStore: () => ({
+        async list() {
+          return instances;
+        },
+      }),
+      createPeerLabelStore: () => ({
+        async listRawLabels(instanceId) {
+          assert.equal(instanceId, "alice@abc.111");
+          return [];
+        },
+        async replaceLabels(instanceId, labels) {
+          writes.push({ instanceId, labels });
+        },
+      }),
+    },
+  });
+
+  const labels = root.children.find((child) => child.name === "libp2p-mesh")?.children.find((child) => child.name === "labels");
+  assert.ok(labels?.actionHandler);
+  await labels.actionHandler();
+
+  assert.deepEqual(writes, [{ instanceId: "alice@abc.111", labels: [{ key: "group", value: "实验室" }] }]);
+  assert.match(printed.join("\n"), /Local labels saved/);
+  assert.equal(closeCount, 1);
 });
 
 test("profile command action loads USER.md tags and profile attrs, then writes only structured attrs", async () => {
@@ -197,7 +265,7 @@ test("profile command action loads USER.md tags and profile attrs, then writes o
   assert.match(printed.join("\n"), /Restart the gateway/);
 });
 
-test("registerLibp2pMesh exposes setup profile and debug CLI commands in one registration", () => {
+test("registerLibp2pMesh exposes setup profile labels and debug CLI commands in one registration", () => {
   const root = makeCommand("openclaw");
   const { api, registrations } = makeApi(root);
 
@@ -208,5 +276,6 @@ test("registerLibp2pMesh exposes setup profile and debug CLI commands in one reg
   assert.ok(libp2p);
   assert.ok(libp2p.children.find((child) => child.name === "setup"));
   assert.ok(libp2p.children.find((child) => child.name === "profile"));
+  assert.ok(libp2p.children.find((child) => child.name === "labels"));
   assert.ok(libp2p.children.find((child) => child.name === "debug"));
 });
