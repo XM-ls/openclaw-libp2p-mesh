@@ -215,3 +215,101 @@ test("service registers router and inbound handlers before mesh startup", async 
   assert.ok(calls.includes("router.stop"));
   assert.ok(calls.includes("mesh.stop"));
 });
+
+test("service cleans inbound handlers after mesh startup failure before retry", async () => {
+  const calls: string[] = [];
+  const { api, services } = makeApi(calls);
+  let startAttempts = 0;
+
+  registerLibp2pMeshWithDeps(api, {
+    createMeshNetwork: () => ({
+      ...makeMesh(calls),
+      async start() {
+        calls.push("mesh.start");
+        startAttempts++;
+        if (startAttempts === 1) {
+          throw new Error("startup failed");
+        }
+      },
+    }),
+    createInstanceRouter: () => makeRouter(calls),
+  });
+
+  assert.equal(services.length, 1);
+  await assert.rejects(services[0].start(), /startup failed/);
+  assert.deepEqual(calls.slice(0, 5), [
+    "router.attachHandlers",
+    "inbound.attach",
+    "mesh.start",
+    "inbound.unsubscribe",
+    "router.stop",
+  ]);
+
+  await services[0].start();
+  assert.equal(
+    calls.filter((call) => call === "inbound.attach").length,
+    2,
+    "retry after failed startup should attach one fresh inbound handler",
+  );
+  assert.equal(
+    calls.filter((call) => call === "inbound.unsubscribe").length,
+    1,
+    "failed startup should clean the stale inbound handler before retry",
+  );
+
+  await services[0].stop();
+  assert.equal(
+    calls.filter((call) => call === "inbound.unsubscribe").length,
+    2,
+    "stop should clean the active inbound handler from the successful retry",
+  );
+});
+
+test("concurrent service starts share one startup and handler registration", async () => {
+  const calls: string[] = [];
+  const { api, services } = makeApi(calls);
+  let releaseStart!: () => void;
+  const startGate = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+
+  registerLibp2pMeshWithDeps(api, {
+    createMeshNetwork: () => ({
+      ...makeMesh(calls),
+      async start() {
+        calls.push("mesh.start");
+        await startGate;
+      },
+    }),
+    createInstanceRouter: () => makeRouter(calls),
+  });
+
+  assert.equal(services.length, 1);
+  const firstStart = services[0].start();
+  const secondStart = services[0].start();
+  releaseStart();
+  await Promise.all([firstStart, secondStart]);
+
+  assert.equal(
+    calls.filter((call) => call === "router.attachHandlers").length,
+    1,
+    "concurrent starts should attach router handlers once",
+  );
+  assert.equal(
+    calls.filter((call) => call === "inbound.attach").length,
+    1,
+    "concurrent starts should attach inbound handlers once",
+  );
+  assert.equal(
+    calls.filter((call) => call === "mesh.start").length,
+    1,
+    "concurrent starts should share one mesh startup",
+  );
+  assert.equal(
+    calls.filter((call) => call === "router.announceToConnectedPeers").length,
+    1,
+    "concurrent starts should announce once after mesh startup",
+  );
+
+  await services[0].stop();
+});

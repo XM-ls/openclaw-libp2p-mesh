@@ -30,6 +30,7 @@ export function registerLibp2pMeshWithDeps(
   const config = api.pluginConfig as MeshConfig | undefined;
   let unsubscribeInbound: (() => void) | undefined;
   let serviceStarted = false;
+  let startPromise: Promise<void> | undefined;
   const mesh = (deps.createMeshNetwork ?? createMeshNetwork)({
     config,
     logger: api.logger,
@@ -100,6 +101,36 @@ export function registerLibp2pMeshWithDeps(
     });
   }
 
+  async function cleanupStartupFailure(): Promise<void> {
+    try {
+      unsubscribeInbound?.();
+    } catch (error) {
+      api.logger.warn?.(
+        `[libp2p-mesh] Failed to clean inbound handler after startup failure: ${String(error)}`,
+      );
+    } finally {
+      unsubscribeInbound = undefined;
+    }
+
+    try {
+      await router.stop();
+    } catch (error) {
+      api.logger.warn?.(
+        `[libp2p-mesh] Failed to stop router after startup failure: ${String(error)}`,
+      );
+    }
+
+    try {
+      await mesh.stop();
+    } catch (error) {
+      api.logger.warn?.(
+        `[libp2p-mesh] Failed to stop mesh after startup failure: ${String(error)}`,
+      );
+    }
+
+    serviceStarted = false;
+  }
+
   // 1. Register Service (manages libp2p node lifecycle)
   api.registerService({
     id: "libp2p-mesh",
@@ -108,32 +139,52 @@ export function registerLibp2pMeshWithDeps(
         api.logger.debug?.("[libp2p-mesh] Service already started; ignoring duplicate start.");
         return;
       }
-      router.attachHandlers();
-      unsubscribeInbound = attachInboundHandlers();
-      await mesh.start();
-      await router.announceToConnectedPeers();
-      const identity = mesh.getInstanceIdentity();
-      api.logger.info?.(`[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`);
-      if (identity) {
-        api.logger.info?.(`[libp2p-mesh] Instance Identity: ${identity.id}`);
+
+      if (startPromise) {
+        api.logger.debug?.("[libp2p-mesh] Service start already in progress; waiting for it.");
+        return startPromise;
       }
-      const nat = mesh.getNATStatus();
-      const enabledNames = Object.entries(nat.enabled)
-        .filter(([, on]) => on)
-        .map(([k]) => k);
-      if (enabledNames.length > 0) {
-        api.logger.info?.(
-          `[libp2p-mesh] NAT traversal services: ${enabledNames.join(", ")}`,
-        );
-      }
-      if (nat.reservedRelays.length > 0) {
-        api.logger.info?.(
-          `[libp2p-mesh] Active relay reservations: ${nat.reservedRelays.join(", ")}`,
-        );
-      }
-      serviceStarted = true;
+
+      startPromise = (async () => {
+        try {
+          router.attachHandlers();
+          unsubscribeInbound = attachInboundHandlers();
+          await mesh.start();
+          await router.announceToConnectedPeers();
+          const identity = mesh.getInstanceIdentity();
+          api.logger.info?.(
+            `[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`,
+          );
+          if (identity) {
+            api.logger.info?.(`[libp2p-mesh] Instance Identity: ${identity.id}`);
+          }
+          const nat = mesh.getNATStatus();
+          const enabledNames = Object.entries(nat.enabled)
+            .filter(([, on]) => on)
+            .map(([k]) => k);
+          if (enabledNames.length > 0) {
+            api.logger.info?.(
+              `[libp2p-mesh] NAT traversal services: ${enabledNames.join(", ")}`,
+            );
+          }
+          if (nat.reservedRelays.length > 0) {
+            api.logger.info?.(
+              `[libp2p-mesh] Active relay reservations: ${nat.reservedRelays.join(", ")}`,
+            );
+          }
+          serviceStarted = true;
+        } catch (error) {
+          await cleanupStartupFailure();
+          throw error;
+        } finally {
+          startPromise = undefined;
+        }
+      })();
+
+      return startPromise;
     },
     stop: async () => {
+      await startPromise?.catch(() => undefined);
       unsubscribeInbound?.();
       unsubscribeInbound = undefined;
       await router.stop();

@@ -225,7 +225,7 @@ If `inboundTargets` is an empty array, inbound delivery is disabled. If `inbound
 | `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
 | `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
-| `announceLogDetail` | `"off" \| "summary" \| "payload"` | `"summary"` | Controls instance announce logging. `summary` logs peer, instance, address count, and attribute count; `payload` also logs the full announce JSON; `off` disables the new announce summary/payload logs. |
+| `announceLogDetail` | `"off" \| "summary" \| "payload"` | `"summary"` | Controls instance announce logging. `summary` logs peer, instance, address count, and attribute count; `payload` also logs the full announce JSON; `off` disables only the new announce summary/payload logs and keeps legacy/basic info logs. |
 | `inboundChannel` | `string` | `undefined` | OpenClaw channel used to display inbound P2P user messages, for example `"feishu"` |
 | `inboundTarget` | `string` | `undefined` | OpenClaw channel target for inbound P2P messages, for example `user:ou_xxx` or `chat:oc_xxx` |
 | `inboundTargets` | `array` | `undefined` | Optional list of receiver-owned channel targets for inbound P2P user messages. When present, it overrides `inboundChannel`/`inboundTarget`; an empty array disables inbound delivery. |
@@ -238,7 +238,7 @@ During gateway startup, `libp2p-mesh` registers the instance router handlers and
 Instance announce logs are controlled by `plugins.entries["libp2p-mesh"].config.announceLogDetail`:
 
 - `summary` is the default. It logs send/receive direction, peer ID, instance ID, multiaddr count, and public attribute count. It does not print the full announce JSON.
-- `off` disables the new announce summary and payload logs while keeping warnings and errors.
+- `off` disables the new announce summary and payload logs. It still keeps legacy/basic info logs such as sent announce lines and instance mapping updates, along with warnings and errors.
 - `payload` logs the same summary plus the full announce JSON at debug level.
 
 Use the debug command to inspect or change this value:
