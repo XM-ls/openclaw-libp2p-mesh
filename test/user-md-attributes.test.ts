@@ -191,6 +191,27 @@ test("extractUserMdTags keeps useful USER.md tags without Chinese filler words",
   assert.equal(values.includes("网络"), false);
 });
 
+test("extractUserMdTags supports OpenClaw markdown field formatting", () => {
+  const tags = extractUserMdTags([
+    "# USER.md - About Your Human",
+    "",
+    "- **Name:** ypp",
+    "- **What to call them:** ypp",
+    "- **Pronouns:** _(未指定)_",
+    "- **Timezone:** Asia/Shanghai (GMT+8)",
+    "- **Notes:** 正在做关于 P2P 网络的项目",
+    "",
+    "## Context",
+    "",
+    "- 当前专注于 P2P 网络相关的工作",
+  ].join("\n"));
+  const values = tags.map((tag) => tag.value);
+
+  assert.equal(values.includes("ypp"), true);
+  assert.equal(values.includes("P2P"), true);
+  assert.equal(values.includes("关于"), false);
+});
+
 test("extractUserMdTags extracts conservative short tags from natural language", () => {
   const tags = extractUserMdTags([
     "# USER",

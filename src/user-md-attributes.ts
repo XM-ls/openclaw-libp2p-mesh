@@ -101,11 +101,15 @@ function isTemplateText(value: string): boolean {
 }
 
 function stripMarkdown(line: string): string {
+  return stripMarkdownSyntax(line).replace(FIELD_PREFIX_PATTERN, "").trim();
+}
+
+function stripMarkdownSyntax(line: string): string {
   return line
-    .replace(FIELD_PREFIX_PATTERN, "")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/[*_~#>]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -162,14 +166,15 @@ function looksLikeSentence(value: string): boolean {
 }
 
 function fieldValue(line: string): { field: string; value: string } | undefined {
-  const match = line.match(FIELD_LINE_PATTERN);
+  const normalized = stripMarkdownSyntax(line);
+  const match = normalized.match(FIELD_LINE_PATTERN);
   if (!match) {
     return undefined;
   }
 
   return {
     field: (match[1] ?? "").toLowerCase(),
-    value: stripMarkdown(match[2] ?? ""),
+    value: stripMarkdownSyntax(match[2] ?? ""),
   };
 }
 
