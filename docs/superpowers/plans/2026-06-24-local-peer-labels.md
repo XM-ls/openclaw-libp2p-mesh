@@ -281,6 +281,10 @@ git commit -m "feat: add local peer label store"
 
 ### 任务 2: Labels Wizard 交互式本地标签配置
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `982cb2a` `feat: add local peer labels wizard`; `edeb4b7` `test: cover choosing another peer label instance`
+
 **Harness（测试框架）:**
 
 - **范围：** 只实现纯 wizard 函数，使用注入的实例列表、初始 labels 和 writer；不注册真实 CLI，不读写真实文件。
