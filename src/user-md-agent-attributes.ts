@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -159,11 +159,16 @@ async function writeCache(cachePath: string, userMdHash: string, attributes: Use
     attributes: validateExtractedUserMdTags(attributes),
   };
   const dir = path.dirname(cachePath);
-  const tmpPath = `${cachePath}.tmp-${process.pid}-${Date.now()}`;
+  const tmpPath = `${cachePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
 
   await mkdir(dir, { recursive: true });
-  await writeFile(tmpPath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
-  await rename(tmpPath, cachePath);
+  try {
+    await writeFile(tmpPath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+    await rename(tmpPath, cachePath);
+  } catch (error) {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 function isExtractionUnavailable(value: unknown): value is UserMdAttributeExtractionUnavailable {

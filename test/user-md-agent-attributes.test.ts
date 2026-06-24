@@ -117,3 +117,48 @@ test("refreshTags skips USER.md tags and warns when extractor is unavailable", a
     assert.equal(warnings.some((message) => message.includes("runtime extraction unavailable")), true);
   });
 });
+
+test("concurrent refreshTags writes use collision-resistant cache temp paths", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1234567890;
+  try {
+    await withTempDir(async (dir) => {
+      const userMdPath = path.join(dir, "workspace", "USER.md");
+      const cachePath = path.join(dir, "libp2p", "user-md-attributes-cache.json");
+      await mkdir(path.dirname(userMdPath), { recursive: true });
+      await writeFile(userMdPath, "Name: ypp\nNotes: P2P\n", "utf8");
+
+      let waiting = 0;
+      let releaseExtractors: () => void = () => {};
+      const bothExtractorsStarted = new Promise<void>((resolve) => {
+        releaseExtractors = resolve;
+      });
+      const source = createUserMdAgentAttributeSource({
+        path: userMdPath,
+        cachePath,
+        extractor: {
+          async extract() {
+            waiting += 1;
+            if (waiting === 2) {
+              releaseExtractors();
+            }
+            await bothExtractorsStarted;
+            return [{ kind: "tag", value: "P2P", label: "P2P", source: "USER.md" }];
+          },
+        },
+      });
+
+      const results = await Promise.allSettled([source.refreshTags(), source.refreshTags()]);
+
+      assert.deepEqual(
+        results.map((result) => result.status),
+        ["fulfilled", "fulfilled"],
+      );
+      const cache = JSON.parse(await readFile(cachePath, "utf8"));
+      assert.equal(cache.version, 1);
+      assert.equal(cache.attributes[0].value, "P2P");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
