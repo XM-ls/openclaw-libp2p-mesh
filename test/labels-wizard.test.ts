@@ -69,6 +69,19 @@ const aliceRecord = makeRecord("alice@abc.111", "peer-alice", {
   ],
 });
 
+const bobRecord = makeRecord("bob@abc.222", "peer-bob", {
+  instanceName: "Bob workstation",
+  userPublicAttributes: [
+    {
+      kind: "structured",
+      key: "project",
+      value: "Mesh",
+      label: "project: Mesh",
+      source: "profile",
+    },
+  ],
+});
+
 test("adds a local label for a selected discovered instance", async () => {
   const { writer, writes } = makeWriter();
   const printed: string[] = [];
@@ -151,6 +164,26 @@ test("custom label prompts for custom key", async () => {
 
   assert.equal(result.status, "saved");
   assert.deepEqual(writes, [{ instanceId: "alice@abc.111", labels: [{ key: "team", value: "core" }] }]);
+});
+
+test("chooses another discovered instance and saves only its reloaded labels", async () => {
+  const { writer, writes } = makeWriter();
+  const getLabelsCalls: string[] = [];
+  const result = await runLabelsWizard({
+    prompter: makePrompter(["instance-index-0", "choose-instance", "instance-index-1", "save-finish"]),
+    instances: [aliceRecord, bobRecord],
+    async getLabels(instanceId) {
+      getLabelsCalls.push(instanceId);
+      return instanceId === "bob@abc.222"
+        ? [{ key: "project", value: "mesh" }]
+        : [{ key: "role", value: "reviewer" }];
+    },
+    writer,
+  });
+
+  assert.equal(result.status, "saved");
+  assert.deepEqual(getLabelsCalls, ["alice@abc.111", "bob@abc.222"]);
+  assert.deepEqual(writes, [{ instanceId: "bob@abc.222", labels: [{ key: "project", value: "mesh" }] }]);
 });
 
 test("Ctrl+C cancellation exits without writing", async () => {
