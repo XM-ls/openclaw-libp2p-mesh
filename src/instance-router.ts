@@ -213,6 +213,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   const pendingAcks = new Map<string, PendingAck>();
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
   const unsubs: Array<() => void> = [];
+  let attributeRefreshPromise: Promise<void> | undefined;
 
   function localInstanceId(): string {
     const identity = mesh.getInstanceIdentity();
@@ -222,26 +223,26 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     return identity.id;
   }
 
-  async function loadUserPublicAttributes(): Promise<UserPublicAttribute[]> {
-    const [userMdTags, profileAttributes] = await Promise.all([
-      options.userAttributeSource?.loadTags().catch((error) => {
-        logger?.warn?.(
-          `[libp2p-mesh] Failed to load USER.md public attributes: ${summarizeError(error)}`,
-        );
-        return [];
-      }) ?? Promise.resolve([]),
+  async function loadUserPublicAttributes(loadOptions?: {
+    refreshUserMd?: boolean;
+  }): Promise<UserPublicAttribute[]> {
+    const userMdTags = loadOptions?.refreshUserMd && options.userAttributeSource?.refreshTags
+      ? await options.userAttributeSource.refreshTags()
+      : await (options.userAttributeSource?.loadTags() ?? Promise.resolve([]));
+
+    const profileAttributes = await (
       options.userProfileStore?.listAttributes().catch((error) => {
         logger?.warn?.(
           `[libp2p-mesh] Failed to load profile public attributes: ${summarizeError(error)}`,
         );
         return [];
-      }) ?? Promise.resolve([]),
-    ]);
+      }) ?? Promise.resolve([])
+    );
 
     return mergeUserPublicAttributes(userMdTags, profileAttributes);
   }
 
-  async function buildAnnouncePayload(): Promise<InstanceAnnouncePayload> {
+  function buildBaseAnnouncePayload(): InstanceAnnouncePayload {
     const identity = mesh.getInstanceIdentity();
     if (!identity) {
       throw new Error("Local instance identity is not initialized");
@@ -253,9 +254,73 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       instanceName: identity.name,
       multiaddrs: mesh.getMultiaddrs(),
       pubkey: identity.pubkey,
-      userPublicAttributes: await loadUserPublicAttributes(),
       announcedAt: Date.now(),
     };
+  }
+
+  async function buildAttributeAnnouncePayload(): Promise<InstanceAnnouncePayload> {
+    return {
+      ...buildBaseAnnouncePayload(),
+      userPublicAttributes: await loadUserPublicAttributes({ refreshUserMd: true }),
+    };
+  }
+
+  function attributeAnnouncePeers(extraPeerId?: string): string[] {
+    const peers = new Set<string>();
+    for (const peerId of mesh.getConnectedPeers()) {
+      if (isNonEmptyString(peerId) && peerId !== mesh.getLocalPeerId()) {
+        peers.add(peerId);
+      }
+    }
+    for (const peerId of announcedPeers) {
+      if (isNonEmptyString(peerId) && peerId !== mesh.getLocalPeerId()) {
+        peers.add(peerId);
+      }
+    }
+    if (extraPeerId && extraPeerId !== mesh.getLocalPeerId()) {
+      peers.add(extraPeerId);
+    }
+    return [...peers];
+  }
+
+  async function sendAttributeAnnounceToPeers(peers: string[]): Promise<void> {
+    if (peers.length === 0) {
+      return;
+    }
+
+    const payload = await buildAttributeAnnouncePayload();
+    for (const peerId of peers) {
+      try {
+        await mesh.sendStructuredMessage(peerId, {
+          id: crypto.randomUUID(),
+          type: "instance-announce",
+          to: peerId,
+          payload: JSON.stringify(payload),
+        });
+        logAnnounce("Sent", peerId, payload);
+      } catch (error) {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to send attribute announce to ${peerId}: ${summarizeError(error)}`,
+        );
+      }
+    }
+  }
+
+  function queueAttributeRefresh(extraPeerId?: string): void {
+    const peers = attributeAnnouncePeers(extraPeerId);
+    if (peers.length === 0 || attributeRefreshPromise) {
+      return;
+    }
+
+    attributeRefreshPromise = sendAttributeAnnounceToPeers(peers)
+      .catch((error) => {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to refresh public attributes: ${summarizeError(error)}`,
+        );
+      })
+      .finally(() => {
+        attributeRefreshPromise = undefined;
+      });
   }
 
   async function announceToPeer(peerId: string): Promise<void> {
@@ -263,7 +328,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       return;
     }
 
-    const payload = await buildAnnouncePayload();
+    const payload = buildBaseAnnouncePayload();
     await mesh.sendStructuredMessage(peerId, {
       id: crypto.randomUUID(),
       type: "instance-announce",
@@ -272,6 +337,21 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     });
     announcedPeers.add(peerId);
     logAnnounce("Sent", peerId, payload);
+    queueAttributeRefresh(peerId);
+  }
+
+  async function refreshPublicAttributes(): Promise<void> {
+    if (attributeRefreshPromise) {
+      await attributeRefreshPromise;
+      return;
+    }
+
+    attributeRefreshPromise = sendAttributeAnnounceToPeers(attributeAnnouncePeers()).finally(
+      () => {
+        attributeRefreshPromise = undefined;
+      },
+    );
+    await attributeRefreshPromise;
   }
 
   function announceSummary(
@@ -787,6 +867,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     stop,
     handleMessage,
     announceToPeer,
+    refreshPublicAttributes,
     listInstances,
     resolveInstance,
     sendInstanceMessage,

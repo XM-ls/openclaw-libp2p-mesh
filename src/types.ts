@@ -253,6 +253,7 @@ export interface InstanceRouter {
   stop(): Promise<void>;
   handleMessage(msg: P2PMessage): Promise<void>;
   announceToPeer(peerId: string): Promise<void>;
+  refreshPublicAttributes(): Promise<void>;
   listInstances(): Promise<InstancePeerRecord[]>;
   resolveInstance(instanceId: string): Promise<InstancePeerRecord | undefined>;
   sendInstanceMessage(instanceId: string, message: string): Promise<{
