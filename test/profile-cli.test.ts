@@ -95,7 +95,7 @@ function makePrompter(script: Array<string | boolean>, printed: string[] = []): 
   };
 }
 
-test("registerLibp2pMeshCli registers setup and profile under one libp2p-mesh root command", () => {
+test("registerLibp2pMeshCli registers setup profile and debug under one libp2p-mesh root command", () => {
   const root = makeCommand("openclaw");
   const { api, registrations } = makeApi(root);
 
@@ -118,12 +118,16 @@ test("registerLibp2pMeshCli registers setup and profile under one libp2p-mesh ro
         },
       }),
     },
+    debug: {
+      createPrompter: () => makePrompter(["summary"]),
+    },
   });
 
   const libp2pRoots = root.children.filter((child) => child.name === "libp2p-mesh");
   assert.equal(libp2pRoots.length, 1);
   assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "setup"));
   assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "profile"));
+  assert.ok(libp2pRoots[0]?.children.find((child) => child.name === "debug"));
   assert.deepEqual(registrations[0]?.opts, {
     commands: ["libp2p-mesh"],
     descriptors: [
@@ -193,7 +197,7 @@ test("profile command action loads USER.md tags and profile attrs, then writes o
   assert.match(printed.join("\n"), /Restart the gateway/);
 });
 
-test("registerLibp2pMesh exposes setup and profile CLI commands in one registration", () => {
+test("registerLibp2pMesh exposes setup profile and debug CLI commands in one registration", () => {
   const root = makeCommand("openclaw");
   const { api, registrations } = makeApi(root);
 
@@ -204,4 +208,5 @@ test("registerLibp2pMesh exposes setup and profile CLI commands in one registrat
   assert.ok(libp2p);
   assert.ok(libp2p.children.find((child) => child.name === "setup"));
   assert.ok(libp2p.children.find((child) => child.name === "profile"));
+  assert.ok(libp2p.children.find((child) => child.name === "debug"));
 });

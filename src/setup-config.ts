@@ -1,4 +1,4 @@
-import type { InboundTargetConfig, MeshConfig } from "./types.js";
+import type { AnnounceLogDetail, InboundTargetConfig, MeshConfig } from "./types.js";
 
 export const LIBP2P_MESH_PLUGIN_ID = "libp2p-mesh";
 export const DEFAULT_DELIVERY_ACK_TIMEOUT_MS = 15000;
@@ -36,6 +36,14 @@ export type LegacyInboundMigrationMode = "convert" | "keep" | "replace";
 
 export function getLibp2pMeshConfig(config: OpenClawConfigLike): MeshConfig | undefined {
   return config.plugins?.entries?.[LIBP2P_MESH_PLUGIN_ID]?.config as MeshConfig | undefined;
+}
+
+export function getAnnounceLogDetail(config: OpenClawConfigLike): AnnounceLogDetail {
+  return normalizeAnnounceLogDetail(getLibp2pMeshConfig(config)?.announceLogDetail);
+}
+
+export function normalizeAnnounceLogDetail(value: unknown): AnnounceLogDetail {
+  return value === "off" || value === "payload" || value === "summary" ? value : "summary";
 }
 
 export function buildNetworkConfig(
@@ -93,6 +101,32 @@ export function applyPluginConfig(config: OpenClawConfigLike, pluginConfig: Mesh
           ...config.plugins?.entries?.[LIBP2P_MESH_PLUGIN_ID],
           enabled: true,
           config: pluginConfig as Record<string, unknown>,
+        },
+      },
+    },
+  };
+}
+
+export function applyAnnounceLogDetail(
+  config: OpenClawConfigLike,
+  announceLogDetail: AnnounceLogDetail,
+): OpenClawConfigLike {
+  const existingEntry = config.plugins?.entries?.[LIBP2P_MESH_PLUGIN_ID];
+  const existingPluginConfig = existingEntry?.config ?? {};
+
+  return {
+    ...config,
+    plugins: {
+      ...config.plugins,
+      entries: {
+        ...config.plugins?.entries,
+        [LIBP2P_MESH_PLUGIN_ID]: {
+          ...existingEntry,
+          enabled: existingEntry?.enabled ?? true,
+          config: {
+            ...existingPluginConfig,
+            announceLogDetail,
+          },
         },
       },
     },

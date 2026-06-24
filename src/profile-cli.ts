@@ -7,6 +7,7 @@ import {
   type ClosableSetupPrompter,
   type SetupCliDeps,
 } from "./setup-cli.js";
+import { registerLibp2pMeshDebugCommand, type DebugCliDeps } from "./debug-cli.js";
 import { runProfileWizard } from "./profile-wizard.js";
 import { createUserMdAttributeSource } from "./user-md-attributes.js";
 import { createUserProfileStore, type UserProfileStore } from "./user-profile-store.js";
@@ -29,6 +30,7 @@ export type ProfileCliDeps = {
 export type Libp2pMeshCliDeps = {
   setup?: SetupCliDeps;
   profile?: ProfileCliDeps;
+  debug?: DebugCliDeps;
 };
 
 export function registerLibp2pMeshCli(api: OpenClawPluginApi, deps: Libp2pMeshCliDeps = {}): void {
@@ -39,6 +41,7 @@ export function registerLibp2pMeshCli(api: OpenClawPluginApi, deps: Libp2pMeshCl
 
     registerLibp2pMeshSetupCommand(root, api, ctx, deps.setup);
     registerLibp2pMeshProfileCommand(root, api, ctx, deps.profile);
+    registerLibp2pMeshDebugCommand(root, api, ctx, deps.debug);
   }, LIBP2P_MESH_CLI_REGISTRATION);
 }
 
