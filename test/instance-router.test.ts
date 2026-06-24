@@ -567,7 +567,7 @@ test("announce logging payload mode records complete announce JSON", async () =>
   );
 });
 
-test("announce logging off mode suppresses summary and payload logs", async () => {
+test("announce logging off mode preserves mapping update logs", async () => {
   const sent: SentMessage[] = [];
   const { logs, logger } = makeLogger();
   const router = createInstanceRouter({
@@ -599,7 +599,9 @@ test("announce logging off mode suppresses summary and payload logs", async () =
     timestamp: 1,
   });
 
-  assert.deepEqual(logs.info, []);
+  assert.deepEqual(logs.info, [
+    "[libp2p-mesh] Instance mapping updated: remote-instance -> remote-peer",
+  ]);
   assert.deepEqual(logs.debug, []);
 });
 

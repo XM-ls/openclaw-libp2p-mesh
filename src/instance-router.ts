@@ -299,6 +299,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     const result = await store.upsertFromAnnounce(payload);
+    if (result.changed) {
+      logger?.info?.(
+        `[libp2p-mesh] Instance mapping updated: ${payload.instanceId} -> ${payload.peerId}`,
+      );
+    }
     logAnnounce("Received", msg.from, payload, result.changed);
 
     if (!announcedPeers.has(msg.from)) {
