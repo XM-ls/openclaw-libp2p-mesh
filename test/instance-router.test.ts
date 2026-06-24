@@ -860,6 +860,7 @@ test("sendUserAttributeMessage local scope matches peer labels only", async () =
   );
 
   assert.deepEqual(calls, ["public@abc.111", "local@abc.222"]);
+  assert.equal(result.scope, "local");
   assert.deepEqual(result.targets, [
     {
       instanceId: "local@abc.222",
@@ -913,6 +914,7 @@ test("sendUserAttributeMessage public scope does not use local labels", async ()
   );
 
   assert.deepEqual(calls, []);
+  assert.equal(result.scope, "public");
   assert.deepEqual(result.targets, [
     {
       instanceId: "public@abc.111",
@@ -976,6 +978,7 @@ test("sendUserAttributeMessage all scope merges public and local matches by inst
     { dryRun: true, scope: "all" },
   );
 
+  assert.equal(result.scope, "all");
   assert.deepEqual(result.targets, [
     {
       instanceId: "both@abc.111",

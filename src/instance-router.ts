@@ -719,12 +719,14 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     message: string,
     sendOptions: UserAttributeMessageOptions = {},
   ) {
+    const scope = effectiveAttributeMatchScope(sendOptions.scope);
     const targets = await resolveUserAttributeTargets(
       match,
-      effectiveAttributeMatchScope(sendOptions.scope),
+      scope,
     );
     if (targets.length === 0) {
       return {
+        scope,
         matched: 0,
         sent: 0,
         delivered: 0,
@@ -735,6 +737,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
     if (sendOptions.dryRun === true) {
       return {
+        scope,
         matched: targets.length,
         sent: 0,
         delivered: 0,
@@ -768,6 +771,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     return {
+      scope,
       matched: targets.length,
       sent: results.filter((result) => result.sent).length,
       delivered: results.filter((result) => result.delivered).length,

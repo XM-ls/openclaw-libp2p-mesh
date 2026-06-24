@@ -186,6 +186,7 @@ export type UserAttributeMessageDeliveryResult = UserAttributeMessageTarget & {
 };
 
 export type UserAttributeMessageResult = {
+  scope: UserAttributeMatchScope;
   matched: number;
   sent: number;
   delivered: number;

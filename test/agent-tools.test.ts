@@ -246,6 +246,7 @@ test("send user attribute tool parses structured selector", async () => {
     makeUserAttributeRouter(async (...args) => {
       calls.push(args);
       return {
+        scope: "local",
         matched: 1,
         sent: 0,
         delivered: 0,
@@ -260,6 +261,7 @@ test("send user attribute tool parses structured selector", async () => {
   });
 
   assert.equal(response.isError, undefined);
+  assert.equal(response.details.scope, "local");
   assert.deepEqual(calls[0], [
     { kind: "structured", key: "group", value: "实验室" },
     "今晚 8 点同步一下进展",
