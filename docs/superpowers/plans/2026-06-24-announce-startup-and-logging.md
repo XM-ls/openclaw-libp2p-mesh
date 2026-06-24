@@ -123,6 +123,10 @@ git commit -m "fix: attach instance router before mesh startup"
 
 ## 任务 2: 调整 plugin service 启动顺序
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `15f5d3e` `fix: register mesh handlers before startup`
+
 **Harness（测试框架）:**
 
 - **范围：** 修改 `src/plugin.ts`，让 router 与 direct/broadcast inbound handlers 在 `mesh.start()` 前注册，mesh 启动后再调用 `router.announceToConnectedPeers()`。不新增日志配置，不新增 debug CLI。
