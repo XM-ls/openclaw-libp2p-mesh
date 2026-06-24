@@ -167,6 +167,30 @@ test("extractUserMdTags does not expose capitalized words from ordinary English 
   assert.equal(values.includes("SecretProject"), false);
 });
 
+test("extractUserMdTags keeps useful USER.md tags without Chinese filler words", () => {
+  const tags = extractUserMdTags([
+    "USER.md - About Your Human",
+    "Name: ypp",
+    "What to call them: ypp",
+    "Pronouns: (未指定)",
+    "Timezone: Asia/Shanghai (GMT+8)",
+    "Notes: 正在做关于 P2P 网络的项目",
+    "Context",
+    "当前专注于 P2P 网络相关的工作",
+  ].join("\n"));
+  const values = tags.map((tag) => tag.value);
+
+  assert.equal(values.includes("ypp"), true);
+  assert.equal(values.includes("P2P"), true);
+  assert.equal(values.includes("关于"), false);
+  assert.equal(values.includes("正在"), false);
+  assert.equal(values.includes("当前"), false);
+  assert.equal(values.includes("相关"), false);
+  assert.equal(values.includes("工作"), false);
+  assert.equal(values.includes("项目"), false);
+  assert.equal(values.includes("网络"), false);
+});
+
 test("extractUserMdTags extracts conservative short tags from natural language", () => {
   const tags = extractUserMdTags([
     "# USER",

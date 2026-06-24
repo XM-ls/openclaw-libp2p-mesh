@@ -16,6 +16,7 @@ const TEMPLATE_PATTERN =
   /\b(?:todo|tbd|n\/a|none|unknown|your name|add notes here|template placeholder|placeholder)\b/i;
 const EXPLICIT_LIST_SEPARATOR_PATTERN = /[,，、;；|/]/;
 const ENGLISH_TAG_PATTERN = /^(?:[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)?|libp2p|node\.js)$/i;
+const TECH_TOKEN_PATTERN = /\b(?:[A-Z][A-Z0-9]{1,}|[A-Za-z]*[0-9][A-Za-z0-9]*|libp2p|node\.js)\b/g;
 const CHINESE_TAG_PATTERN = /[\p{Script=Han}]{2,8}/gu;
 const CHINESE_CONTEXT_PATTERNS = [
   /(?:在|来自|加入|参与|负责)([\p{Script=Han}]{2,8})(?:做|写|用|项目|团队|实验室|方向)?/gu,
@@ -23,6 +24,16 @@ const CHINESE_CONTEXT_PATTERNS = [
 ];
 const CHINESE_SENTENCE_WORD_PATTERN =
   /(?:今天|明天|昨天|今晚|晚上|早上|上午|下午|八点|同步|一下|进展|开会|讨论|安排|提醒|需要|已经|可以|应该|我们|你们|他们)/u;
+const CHINESE_STOP_WORDS = new Set([
+  "关于",
+  "正在",
+  "当前",
+  "相关",
+  "工作",
+  "项目",
+  "网络",
+  "专注",
+]);
 const COMMON_WORDS = new Set([
   "and",
   "also",
@@ -44,6 +55,17 @@ const COMMON_WORDS = new Set([
 const ENGLISH_TAG_FIELDS = new Set([
   "name",
   "what to call them",
+  "project",
+  "projects",
+  "skill",
+  "skills",
+  "interest",
+  "interests",
+]);
+const TECH_TOKEN_FIELDS = new Set([
+  "notes",
+  "note",
+  "context",
   "project",
   "projects",
   "skill",
@@ -104,8 +126,22 @@ function trimChineseCandidate(value: string): string {
 function isStableChineseCandidate(value: string): boolean {
   return (
     /^[\p{Script=Han}]{2,8}$/u.test(value) &&
+    !CHINESE_STOP_WORDS.has(value) &&
     !CHINESE_SENTENCE_WORD_PATTERN.test(value)
   );
+}
+
+function collectTechnicalTokens(value: string): string[] {
+  const tokens: string[] = [];
+
+  for (const match of value.matchAll(TECH_TOKEN_PATTERN)) {
+    const token = trimCandidate(match[0] ?? "");
+    if (isStableEnglishCandidate(token)) {
+      tokens.push(token);
+    }
+  }
+
+  return tokens;
 }
 
 function collectChineseCandidates(value: string): string[] {
@@ -190,6 +226,10 @@ function collectCandidates(line: string): string[] {
   }
   const explicitField = fieldValue(line);
   const explicitFieldValue = explicitField?.value;
+
+  if (explicitField && TECH_TOKEN_FIELDS.has(explicitField.field)) {
+    candidates.push(...collectTechnicalTokens(explicitField.value));
+  }
 
   if (/^[\p{Script=Han}]{2,8}$/u.test(text) && isStableChineseCandidate(text)) {
     candidates.push(text);
