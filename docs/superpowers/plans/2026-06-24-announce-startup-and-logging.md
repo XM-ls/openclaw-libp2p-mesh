@@ -282,6 +282,10 @@ git commit -m "feat: add announce log detail"
 
 ## 任务 4: debug CLI 管理 announce 日志配置
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `0ef3647` `feat: add libp2p mesh debug cli`
+
 **Harness（测试框架）:**
 
 - **范围：** 新增 `openclaw libp2p-mesh debug`，只管理调试配置 `announceLogDetail`。不进入普通 `setup` 主流程，不修改 profile CLI，不修改 announce 发送逻辑。
