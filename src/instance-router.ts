@@ -214,7 +214,6 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
   const unsubs: Array<() => void> = [];
   const pendingAttributePeers = new Set<string>();
-  const activeAttributePeers = new Set<string>();
   let attributeRefreshPromise: Promise<void> | undefined;
 
   function localInstanceId(): string {
@@ -318,7 +317,12 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   }
 
   function queueAttributeRefresh(extraPeerId?: string): void {
-    const peers = attributeAnnouncePeers(extraPeerId);
+    const peers =
+      extraPeerId === undefined
+        ? attributeAnnouncePeers()
+        : isNonEmptyString(extraPeerId) && extraPeerId !== mesh.getLocalPeerId()
+          ? [extraPeerId]
+          : [];
     for (const peerId of peers) {
       pendingAttributePeers.add(peerId);
     }
@@ -336,21 +340,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
         while (pendingAttributePeers.size > 0) {
           const peers = [...pendingAttributePeers];
           pendingAttributePeers.clear();
-          for (const peerId of peers) {
-            activeAttributePeers.add(peerId);
-          }
-          try {
-            await sendAttributeAnnounceToPeers(peers).catch((error) => {
-              logger?.warn?.(
-                `[libp2p-mesh] Failed to refresh public attributes: ${summarizeError(error)}`,
-              );
-            });
-          } finally {
-            for (const peerId of activeAttributePeers) {
-              pendingAttributePeers.delete(peerId);
-            }
-            activeAttributePeers.clear();
-          }
+          await sendAttributeAnnounceToPeers(peers).catch((error) => {
+            logger?.warn?.(
+              `[libp2p-mesh] Failed to refresh public attributes: ${summarizeError(error)}`,
+            );
+          });
         }
       })().finally(() => {
         attributeRefreshPromise = undefined;

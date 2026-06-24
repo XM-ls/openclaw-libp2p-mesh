@@ -540,7 +540,7 @@ test("announceToPeer sends base announce first without userPublicAttributes then
   });
 
   await router.announceToPeer("remote-peer");
-  await router.refreshPublicAttributes();
+  await flushMicrotasks();
 
   assert.equal(refreshCalls, 1);
   assert.equal(sent.length, 2);
@@ -584,7 +584,9 @@ test("queued attribute refresh includes peers announced during slow refresh", as
   await router.announceToPeer("peer-a");
   await router.announceToPeer("peer-b");
   releaseRefresh?.();
-  await router.refreshPublicAttributes();
+  for (let attempt = 0; attempt < 5 && sent.length < 4; attempt += 1) {
+    await flushMicrotasks();
+  }
 
   assert.deepEqual(
     sent.map((entry) => [entry.peerId, entry.message.type]),
@@ -640,6 +642,90 @@ test("refreshPublicAttributes rebroadcasts a full attribute announce to connecte
     assert.deepEqual(payload.userPublicAttributes, [userMdTag]);
     assert.equal(payload.instanceId, "local-instance");
   }
+});
+
+test("overlapping same-peer attribute refresh remains queued for updated attributes", async () => {
+  const sent: SentMessage[] = [];
+  const mesh = makeMesh(sent, { connectedPeers: ["peer-a"] });
+  const oldProfileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "old",
+    label: "group: old",
+    source: "profile",
+  };
+  const newProfileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "new",
+    label: "group: new",
+    source: "profile",
+  };
+  let currentProfile = [oldProfileAttribute];
+  let attributeSendCount = 0;
+  let releaseFirstSend: (() => void) | undefined;
+  const firstSendBlocked = new Promise<void>((resolve) => {
+    const releaseStarted = resolve;
+    mesh.sendStructuredMessage = async (peerId, message) => {
+      sent.push({ peerId, message });
+      const payload = JSON.parse(message.payload);
+      if (
+        peerId === "peer-a" &&
+        message.type === "instance-announce" &&
+        "userPublicAttributes" in payload
+      ) {
+        attributeSendCount += 1;
+        if (attributeSendCount === 1) {
+          releaseStarted();
+          await new Promise<void>((resolveSend) => {
+            releaseFirstSend = resolveSend;
+          });
+        }
+      }
+    };
+  });
+  const router = createInstanceRouter({
+    mesh,
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    userAttributeSource: {
+      async loadTags() {
+        return [];
+      },
+      async refreshTags() {
+        return [];
+      },
+    },
+    userProfileStore: {
+      async listAttributes() {
+        return currentProfile;
+      },
+    },
+  });
+
+  const firstRefresh = router.refreshPublicAttributes();
+  await firstSendBlocked;
+  currentProfile = [newProfileAttribute];
+  const secondRefresh = router.refreshPublicAttributes();
+  releaseFirstSend?.();
+  await Promise.all([firstRefresh, secondRefresh]);
+
+  const attributePayloads = sent
+    .filter((entry) => entry.peerId === "peer-a")
+    .map((entry) => JSON.parse(entry.message.payload))
+    .filter((payload) => "userPublicAttributes" in payload);
+
+  assert.equal(attributePayloads.length, 2);
+  assert.deepEqual(attributePayloads[0].userPublicAttributes, [
+    oldProfileAttribute,
+  ]);
+  assert.deepEqual(attributePayloads[1].userPublicAttributes, [
+    newProfileAttribute,
+  ]);
 });
 
 test("attribute refresh failure keeps profile attributes in announceToPeer refresh", async () => {
