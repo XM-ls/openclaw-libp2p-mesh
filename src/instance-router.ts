@@ -6,14 +6,23 @@ import type {
   InstanceAnnouncePayload,
   InstanceRouter,
   InstanceRouterOptions,
+  LocalPeerLabelAttribute,
   MeshConfig,
   P2PMessage,
   UserAttributeMatch,
+  UserAttributeMessageOptions,
+  UserAttributeMatchScope,
+  UserAttributeMatchSource,
   UserAttributeMessageTarget,
   UserPublicAttribute,
   UserMessagePayload,
 } from "./types.js";
-import { matchesUserAttribute, mergeUserPublicAttributes } from "./user-attributes.js";
+import {
+  matchesUserAttribute,
+  mergeUserPublicAttributes,
+  normalizeAttributeKey,
+  normalizeAttributeValue,
+} from "./user-attributes.js";
 
 export type RouterLogger = {
   info?: (message: string) => void;
@@ -71,6 +80,40 @@ function describeAttributeMatch(match: UserAttributeMatch): string {
   }
 
   return `structured attribute ${match.key}=${match.value}`;
+}
+
+function effectiveAttributeMatchScope(
+  scope: UserAttributeMatchScope | undefined,
+): UserAttributeMatchScope {
+  return scope ?? "public";
+}
+
+function matchesLocalPeerLabel(
+  attribute: LocalPeerLabelAttribute,
+  match: UserAttributeMatch,
+): boolean {
+  if (match.kind !== "structured") {
+    return false;
+  }
+
+  return (
+    normalizeAttributeKey(attribute.key) === normalizeAttributeKey(match.key) &&
+    normalizeAttributeValue(attribute.value) === normalizeAttributeValue(match.value)
+  );
+}
+
+function buildUserAttributeTarget(
+  record: { instanceId: string; instanceName?: string; peerId: string },
+  matchedAttribute: UserPublicAttribute | LocalPeerLabelAttribute,
+  matchSource: UserAttributeMatchSource,
+): UserAttributeMessageTarget {
+  return {
+    instanceId: record.instanceId,
+    ...(record.instanceName ? { instanceName: record.instanceName } : {}),
+    peerId: record.peerId,
+    matchedAttribute,
+    matchSource,
+  };
 }
 
 type EffectiveInboundTarget = {
@@ -634,24 +677,38 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
   async function resolveUserAttributeTargets(
     match: UserAttributeMatch,
+    scope: UserAttributeMatchScope,
   ): Promise<UserAttributeMessageTarget[]> {
     const records = await store.list();
     const targets: UserAttributeMessageTarget[] = [];
 
     for (const record of records) {
-      const matchedAttribute = record.userPublicAttributes?.find((attribute) =>
-        matchesUserAttribute(attribute, match),
-      );
-      if (!matchedAttribute) {
+      const publicAttribute =
+        scope === "local"
+          ? undefined
+          : record.userPublicAttributes?.find((attribute) =>
+              matchesUserAttribute(attribute, match),
+            );
+      const localAttribute =
+        scope === "public"
+          ? undefined
+          : (await options.peerLabelStore?.listLabels(record.instanceId))?.find((attribute) =>
+              matchesLocalPeerLabel(attribute, match),
+            );
+
+      if (publicAttribute && localAttribute && scope === "all") {
+        targets.push(buildUserAttributeTarget(record, publicAttribute, "all"));
         continue;
       }
 
-      targets.push({
-        instanceId: record.instanceId,
-        instanceName: record.instanceName,
-        peerId: record.peerId,
-        matchedAttribute,
-      });
+      if (publicAttribute) {
+        targets.push(buildUserAttributeTarget(record, publicAttribute, "public"));
+        continue;
+      }
+
+      if (localAttribute) {
+        targets.push(buildUserAttributeTarget(record, localAttribute, "local"));
+      }
     }
 
     return targets;
@@ -660,9 +717,12 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   async function sendUserAttributeMessage(
     match: UserAttributeMatch,
     message: string,
-    sendOptions: { dryRun?: boolean } = {},
+    sendOptions: UserAttributeMessageOptions = {},
   ) {
-    const targets = await resolveUserAttributeTargets(match);
+    const targets = await resolveUserAttributeTargets(
+      match,
+      effectiveAttributeMatchScope(sendOptions.scope),
+    );
     if (targets.length === 0) {
       return {
         matched: 0,

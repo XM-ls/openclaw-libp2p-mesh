@@ -118,6 +118,22 @@ function userAttributeTool(router?: InstanceRouter) {
   return tool;
 }
 
+function makeUserAttributeRouter(
+  handler: InstanceRouter["sendUserAttributeMessage"],
+): InstanceRouter {
+  return {
+    ...makeRouter({
+      sendUserAttributeMessage: {
+        matched: 0,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+      },
+    }),
+    sendUserAttributeMessage: handler,
+  };
+}
+
 const researchLoopTag: UserPublicAttribute = {
   kind: "tag",
   value: "ResearchLoop",
@@ -196,7 +212,7 @@ test("send instance tool marks all-target failure as isError and shows details",
   assert.match(text, /telegram-main \(telegram \/ chat:123456\)：失败：机器人对该用户没有可用权限/);
 });
 
-test("send user attribute tool exposes match schema and asks agents to dry run before group sending", () => {
+test("send user attribute tool exposes selector schema and allows sending immediately after dry run", () => {
   const tool = userAttributeTool(
     makeRouter({
       sendUserAttributeMessage: {
@@ -209,11 +225,166 @@ test("send user attribute tool exposes match schema and asks agents to dry run b
   );
 
   assert.match(tool.description, /dry run/i);
+  assert.doesNotMatch(tool.description, /confirm/i);
   assert.equal(tool.parameters.type, "object");
-  assert.deepEqual(tool.parameters.required, ["match", "message"]);
+  assert.deepEqual(tool.parameters.required, ["selector", "message"]);
+  assert.ok(tool.parameters.properties.selector);
   assert.ok(tool.parameters.properties.match);
   assert.ok(tool.parameters.properties.message);
   assert.ok(tool.parameters.properties.dryRun);
+  assert.deepEqual(tool.parameters.properties.scope, {
+    type: "string",
+    enum: ["public", "local", "all"],
+    description:
+      "Attribute source to match: public announced attributes, local peer labels, or both.",
+  });
+});
+
+test("send user attribute tool parses structured selector", async () => {
+  const calls: Parameters<InstanceRouter["sendUserAttributeMessage"]>[] = [];
+  const response = await userAttributeTool(
+    makeUserAttributeRouter(async (...args) => {
+      calls.push(args);
+      return {
+        matched: 1,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        targets: [],
+      };
+    }),
+  ).execute("call-1", {
+    selector: "group=实验室",
+    message: "今晚 8 点同步一下进展",
+    dryRun: true,
+  });
+
+  assert.equal(response.isError, undefined);
+  assert.deepEqual(calls[0], [
+    { kind: "structured", key: "group", value: "实验室" },
+    "今晚 8 点同步一下进展",
+    { dryRun: true },
+  ]);
+});
+
+test("send user attribute tool passes scope to router", async () => {
+  const calls: Parameters<InstanceRouter["sendUserAttributeMessage"]>[] = [];
+  const response = await userAttributeTool(
+    makeUserAttributeRouter(async (...args) => {
+      calls.push(args);
+      return {
+        matched: 1,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        targets: [],
+      };
+    }),
+  ).execute("call-1", {
+    selector: "group=实验室",
+    scope: "local",
+    message: "今晚 8 点同步一下进展",
+    dryRun: true,
+  });
+
+  assert.equal(response.isError, undefined);
+  assert.deepEqual(calls[0], [
+    { kind: "structured", key: "group", value: "实验室" },
+    "今晚 8 点同步一下进展",
+    { dryRun: true, scope: "local" },
+  ]);
+});
+
+test("send user attribute tool rejects invalid scope without calling router", async () => {
+  let called = false;
+  const response = await userAttributeTool(
+    makeUserAttributeRouter(async () => {
+      called = true;
+      throw new Error("should not call router");
+    }),
+  ).execute("call-1", {
+    selector: "group=实验室",
+    scope: "private",
+    message: "今晚 8 点同步一下进展",
+    dryRun: true,
+  });
+
+  assert.equal(called, false);
+  assert.equal(response.isError, true);
+  assert.match(response.content.map((item) => item.text).join("\n"), /scope must be "public", "local", or "all"/);
+});
+
+test("send user attribute tool parses tag selectors", async () => {
+  const calls: Parameters<InstanceRouter["sendUserAttributeMessage"]>[] = [];
+  const tool = userAttributeTool(
+    makeUserAttributeRouter(async (...args) => {
+      calls.push(args);
+      return {
+        matched: 1,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        targets: [],
+      };
+    }),
+  );
+
+  await tool.execute("call-1", {
+    selector: "#P2P",
+    message: "hello team",
+    dryRun: true,
+  });
+  await tool.execute("call-2", {
+    selector: "tag:P2P",
+    message: "hello team",
+    dryRun: true,
+  });
+
+  assert.deepEqual(calls.map((call) => call[0]), [
+    { kind: "tag", value: "P2P" },
+    { kind: "tag", value: "P2P" },
+  ]);
+});
+
+test("send user attribute tool rejects ambiguous bare selector", async () => {
+  const response = await userAttributeTool(
+    makeUserAttributeRouter(async () => {
+      throw new Error("should not call router");
+    }),
+  ).execute("call-1", {
+    selector: "实验室",
+    message: "今晚 8 点同步一下进展",
+    dryRun: true,
+  });
+
+  const text = response.content.map((item) => item.text).join("\n");
+
+  assert.equal(response.isError, true);
+  assert.match(text, /selector "实验室" is ambiguous/);
+  assert.match(text, /group=实验室/);
+  assert.match(text, /tag:实验室/);
+});
+
+test("send user attribute tool keeps legacy match parameter for compatibility", async () => {
+  const calls: Parameters<InstanceRouter["sendUserAttributeMessage"]>[] = [];
+  await userAttributeTool(
+    makeUserAttributeRouter(async (...args) => {
+      calls.push(args);
+      return {
+        matched: 1,
+        sent: 0,
+        delivered: 0,
+        failed: 0,
+        targets: [],
+      };
+    }),
+  ).execute("call-1", {
+    match: { kind: "structured", key: "group", value: "实验室" },
+    message: "今晚 8 点同步一下进展",
+    dryRun: true,
+  });
+
+  assert.deepEqual(calls[0][0], { kind: "structured", key: "group", value: "实验室" });
 });
 
 test("send user attribute tool returns isError when router is unavailable", async () => {

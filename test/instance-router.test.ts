@@ -7,6 +7,7 @@ import type {
   InboundDeliveryRequest,
   InstancePeerRecord,
   InstancePeerStore,
+  LocalPeerLabelAttribute,
   MeshNetwork,
   P2PMessage,
   UserPublicAttribute,
@@ -84,6 +85,19 @@ function makeStore(records: InstancePeerRecord[]): InstancePeerStore {
         changed: !previous || previous.peerId !== payload.peerId,
         peerIdSharedBy: [],
       };
+    },
+  };
+}
+
+function makePeerLabelStore(labelsByInstance: Record<string, LocalPeerLabelAttribute[]>) {
+  const calls: string[] = [];
+  return {
+    calls,
+    store: {
+      async listLabels(instanceId: string) {
+        calls.push(instanceId);
+        return labelsByInstance[instanceId] ?? [];
+      },
     },
   };
 }
@@ -737,12 +751,14 @@ test("sendUserAttributeMessage dry run returns tag-matched targets without sendi
       instanceName: "alpha",
       peerId: "peer-alpha",
       matchedAttribute: researchLoopTag,
+      matchSource: "public",
     },
     {
       instanceId: "beta@abc.222",
       instanceName: "beta",
       peerId: "peer-beta",
       matchedAttribute: researchLoopTag,
+      matchSource: "public",
     },
   ]);
   assert.equal(result.results, undefined);
@@ -798,6 +814,188 @@ test("sendUserAttributeMessage distinguishes tag and structured matches", async 
     structuredResult.targets?.map((target) => target.instanceId),
     ["structured@abc.222"],
   );
+});
+
+test("sendUserAttributeMessage local scope matches peer labels only", async () => {
+  const sent: SentMessage[] = [];
+  const publicGroup: UserPublicAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "profile",
+  };
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const { calls, store: peerLabelStore } = makePeerLabelStore({
+    "local@abc.222": [localGroup],
+  });
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([
+      makeRecord("public@abc.111", "peer-public", {
+        userPublicAttributes: [publicGroup],
+      }),
+      makeRecord("local@abc.222", "peer-local", {
+        userPublicAttributes: [],
+      }),
+    ]),
+    peerLabelStore,
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "hello local",
+    { dryRun: true, scope: "local" },
+  );
+
+  assert.deepEqual(calls, ["public@abc.111", "local@abc.222"]);
+  assert.deepEqual(result.targets, [
+    {
+      instanceId: "local@abc.222",
+      peerId: "peer-local",
+      matchedAttribute: localGroup,
+      matchSource: "local",
+    },
+  ]);
+});
+
+test("sendUserAttributeMessage public scope does not use local labels", async () => {
+  const publicGroup: UserPublicAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "profile",
+  };
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const { calls, store: peerLabelStore } = makePeerLabelStore({
+    "local@abc.222": [localGroup],
+  });
+  const router = createInstanceRouter({
+    mesh: makeMesh([]),
+    store: makeStore([
+      makeRecord("public@abc.111", "peer-public", {
+        userPublicAttributes: [publicGroup],
+      }),
+      makeRecord("local@abc.222", "peer-local", {
+        userPublicAttributes: [],
+      }),
+    ]),
+    peerLabelStore,
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "hello public",
+    { dryRun: true, scope: "public" },
+  );
+
+  assert.deepEqual(calls, []);
+  assert.deepEqual(result.targets, [
+    {
+      instanceId: "public@abc.111",
+      peerId: "peer-public",
+      matchedAttribute: publicGroup,
+      matchSource: "public",
+    },
+  ]);
+});
+
+test("sendUserAttributeMessage all scope merges public and local matches by instance", async () => {
+  const publicGroup: UserPublicAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "profile",
+  };
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const localOnlyGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const { store: peerLabelStore } = makePeerLabelStore({
+    "both@abc.111": [localGroup],
+    "local@abc.333": [localOnlyGroup],
+  });
+  const router = createInstanceRouter({
+    mesh: makeMesh([]),
+    store: makeStore([
+      makeRecord("both@abc.111", "peer-both", {
+        userPublicAttributes: [publicGroup],
+      }),
+      makeRecord("public@abc.222", "peer-public", {
+        userPublicAttributes: [publicGroup],
+      }),
+      makeRecord("local@abc.333", "peer-local", {
+        userPublicAttributes: [],
+      }),
+    ]),
+    peerLabelStore,
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "hello all",
+    { dryRun: true, scope: "all" },
+  );
+
+  assert.deepEqual(result.targets, [
+    {
+      instanceId: "both@abc.111",
+      peerId: "peer-both",
+      matchedAttribute: publicGroup,
+      matchSource: "all",
+    },
+    {
+      instanceId: "public@abc.222",
+      peerId: "peer-public",
+      matchedAttribute: publicGroup,
+      matchSource: "public",
+    },
+    {
+      instanceId: "local@abc.333",
+      peerId: "peer-local",
+      matchedAttribute: localOnlyGroup,
+      matchSource: "local",
+    },
+  ]);
 });
 
 test("sendUserAttributeMessage sends user messages to every match and continues after failures", async () => {
@@ -892,6 +1090,7 @@ test("sendUserAttributeMessage sends user messages to every match and continues 
       instanceName: "alpha",
       peerId: "peer-alpha",
       matchedAttribute: researchLoopTag,
+      matchSource: "public",
       sent: true,
       delivered: true,
     },
@@ -900,6 +1099,7 @@ test("sendUserAttributeMessage sends user messages to every match and continues 
       instanceName: "beta",
       peerId: "peer-beta",
       matchedAttribute: researchLoopTag,
+      matchSource: "public",
       sent: false,
       delivered: false,
       error: "dial failed",
@@ -909,6 +1109,7 @@ test("sendUserAttributeMessage sends user messages to every match and continues 
       instanceName: "gamma",
       peerId: "peer-gamma",
       matchedAttribute: researchLoopTag,
+      matchSource: "public",
       sent: true,
       delivered: false,
       error: "remote delivery failed",

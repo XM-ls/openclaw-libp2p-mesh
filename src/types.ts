@@ -133,6 +133,15 @@ export type UserAttributeMatch =
   | { kind: "tag"; value: string }
   | { kind: "structured"; key: string; value: string };
 
+export type UserAttributeMatchScope = "public" | "local" | "all";
+
+export type UserAttributeMatchSource = "public" | "local" | "all";
+
+export type UserAttributeMessageOptions = {
+  dryRun?: boolean;
+  scope?: UserAttributeMatchScope;
+};
+
 export interface InstancePeerRecord {
   instanceId: string;
   peerId: string;
@@ -166,7 +175,8 @@ export type UserAttributeMessageTarget = {
   instanceId: string;
   instanceName?: string;
   peerId: string;
-  matchedAttribute: UserPublicAttribute;
+  matchedAttribute: UserPublicAttribute | LocalPeerLabelAttribute;
+  matchSource: UserAttributeMatchSource;
 };
 
 export type UserAttributeMessageDeliveryResult = UserAttributeMessageTarget & {
@@ -227,6 +237,9 @@ export type InstanceRouterOptions = {
   userProfileStore?: {
     listAttributes(): Promise<UserPublicAttribute[]>;
   };
+  peerLabelStore?: {
+    listLabels(instanceId: string): Promise<LocalPeerLabelAttribute[]>;
+  };
 };
 
 export interface InstanceRouter {
@@ -252,7 +265,7 @@ export interface InstanceRouter {
   sendUserAttributeMessage(
     match: UserAttributeMatch,
     message: string,
-    options?: { dryRun?: boolean },
+    options?: UserAttributeMessageOptions,
   ): Promise<UserAttributeMessageResult>;
 }
 

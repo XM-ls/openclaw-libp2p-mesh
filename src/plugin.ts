@@ -5,6 +5,7 @@ import { createOpenClawRuntimeInboundDelivery } from "./inbound-delivery.js";
 import { createInstancePeerStore } from "./instance-peer-store.js";
 import { createInstanceRouter } from "./instance-router.js";
 import { createMeshNetwork } from "./mesh.js";
+import { createPeerLabelStore } from "./peer-label-store.js";
 import { createUserMdAttributeSource } from "./user-md-attributes.js";
 import { createUserProfileStore } from "./user-profile-store.js";
 import { buildP2PTools } from "./agent-tools.js";
@@ -36,6 +37,7 @@ export function registerLibp2pMeshWithDeps(
     logger: api.logger,
   });
   const store = createInstancePeerStore({ logger: api.logger });
+  const peerLabelStore = createPeerLabelStore({ logger: api.logger });
   const userAttributeSource = createUserMdAttributeSource({ logger: api.logger });
   const userProfileStore = createUserProfileStore({ logger: api.logger });
   const delivery = createOpenClawRuntimeInboundDelivery({
@@ -60,6 +62,7 @@ export function registerLibp2pMeshWithDeps(
     logger: api.logger,
     userAttributeSource,
     userProfileStore,
+    peerLabelStore,
   });
 
   const channel = createLibp2pMeshChannel(mesh);

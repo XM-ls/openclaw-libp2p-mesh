@@ -1,8 +1,10 @@
 import type {
   DeliveryTargetResult,
   InstanceRouter,
+  LocalPeerLabelAttribute,
   MeshNetwork,
   UserAttributeMatch,
+  UserAttributeMatchScope,
   UserAttributeMessageDeliveryResult,
   UserAttributeMessageTarget,
   UserPublicAttribute,
@@ -28,7 +30,7 @@ function formatDeliveryResults(
   return [heading, ...lines].join("\n");
 }
 
-function attributeLabel(attribute: UserPublicAttribute): string {
+function attributeLabel(attribute: UserPublicAttribute | LocalPeerLabelAttribute): string {
   if (attribute.kind === "tag") {
     return `tag:${attribute.value}`;
   }
@@ -42,7 +44,7 @@ function instanceTargetLabel(target: Pick<UserAttributeMessageTarget, "instanceI
 }
 
 function formatUserAttributeTargets(targets: UserAttributeMessageTarget[]) {
-  return targets.map((target) => `${instanceTargetLabel(target)} [${attributeLabel(target.matchedAttribute)}]`);
+  return targets.map((target) => `${instanceTargetLabel(target)} [${target.matchSource}:${attributeLabel(target.matchedAttribute)}]`);
 }
 
 function formatUserAttributeResults(results: UserAttributeMessageDeliveryResult[]) {
@@ -59,6 +61,7 @@ function formatUserAttributeResults(results: UserAttributeMessageDeliveryResult[
 }
 
 type SendUserAttributeToolParams = {
+  selector?: unknown;
   match?: {
     kind?: unknown;
     key?: unknown;
@@ -66,12 +69,71 @@ type SendUserAttributeToolParams = {
   };
   message?: unknown;
   dryRun?: unknown;
+  scope?: unknown;
 };
 
+function normalizeUserAttributeScope(scope: unknown): UserAttributeMatchScope | undefined {
+  if (scope === undefined) {
+    return undefined;
+  }
+
+  if (scope === "public" || scope === "local" || scope === "all") {
+    return scope;
+  }
+
+  return undefined;
+}
+
+function validateUserAttributeScope(scope: unknown): string | undefined {
+  if (
+    scope === undefined ||
+    scope === "public" ||
+    scope === "local" ||
+    scope === "all"
+  ) {
+    return undefined;
+  }
+
+  return 'scope must be "public", "local", or "all".';
+}
+
+function normalizeUserAttributeSelector(selector: unknown): UserAttributeMatch | string {
+  const value = typeof selector === "string" ? selector.trim() : "";
+  if (!value) {
+    return "selector is required.";
+  }
+
+  if (value.startsWith("#")) {
+    const tagValue = value.slice(1).trim();
+    return tagValue ? { kind: "tag", value: tagValue } : "selector tag value is required.";
+  }
+
+  const tagMatch = /^tag\s*:\s*(.+)$/i.exec(value);
+  if (tagMatch) {
+    const tagValue = tagMatch[1].trim();
+    return tagValue ? { kind: "tag", value: tagValue } : "selector tag value is required.";
+  }
+
+  const structuredMatch = /^([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(.+)$/.exec(value);
+  if (structuredMatch) {
+    const key = structuredMatch[1].trim();
+    const attributeValue = structuredMatch[2].trim();
+    return key && attributeValue
+      ? { kind: "structured", key, value: attributeValue }
+      : "selector key and value are required.";
+  }
+
+  return `selector "${value}" is ambiguous. Use "group=${value}" for structured group matching or "tag:${value}" for USER.md tags.`;
+}
+
 function normalizeUserAttributeMatch(params: SendUserAttributeToolParams): UserAttributeMatch | string {
+  if (params.selector !== undefined) {
+    return normalizeUserAttributeSelector(params.selector);
+  }
+
   const match = params.match;
   if (!match || typeof match !== "object") {
-    return "match is required.";
+    return "selector is required.";
   }
 
   if (match.kind === "tag") {
@@ -452,14 +514,20 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
       name: "p2p_send_user_attribute_message",
       label: "P2P Send User Attribute Message",
       description:
-        "Send a user message to discovered OpenClaw instances matching a public user attribute. Always run a dry run with dryRun=true first and ask the user to confirm targets before group sending.",
+        'Send a user message to discovered OpenClaw instances matching a public user attribute selector. Use selectors like "group=实验室", "project=小龙虾", "tag:P2P", or "#P2P". First run a dry run with dryRun=true to preview targets; if targets match, call again immediately with dryRun=false and the same selector.',
       parameters: {
         type: "object" as const,
         properties: {
+          selector: {
+            type: "string" as const,
+            description:
+              'Public attribute selector. Use "key=value" for structured profile attributes such as "group=实验室" or "project=小龙虾"; use "tag:value" or "#value" for USER.md tags. Bare values are rejected as ambiguous.',
+          },
           match: {
             type: "object" as const,
+            deprecated: true,
             description:
-              'User public attribute match. Use { "kind": "tag", "value": "..." } for USER.md tags or { "kind": "structured", "key": "...", "value": "..." } for profile attributes.',
+              'Deprecated compatibility field. Prefer selector. Use { "kind": "tag", "value": "..." } for USER.md tags or { "kind": "structured", "key": "...", "value": "..." } for profile attributes.',
             oneOf: [
               {
                 type: "object" as const,
@@ -493,14 +561,20 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
           },
           message: {
             type: "string" as const,
-            description: "Message content to send after dry-run target confirmation.",
+            description: "Message content to send after a matching dry run.",
           },
           dryRun: {
             type: "boolean" as const,
             description: "Preview matching instances without sending. Run this before group sending.",
           },
+          scope: {
+            type: "string" as const,
+            enum: ["public", "local", "all"],
+            description:
+              "Attribute source to match: public announced attributes, local peer labels, or both.",
+          },
         },
-        required: ["match", "message"],
+        required: ["selector", "message"],
       },
       async execute(_toolCallId: string, params: SendUserAttributeToolParams) {
         if (!router) {
@@ -512,9 +586,16 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
         }
 
         const match = normalizeUserAttributeMatch(params);
+        const scopeError = validateUserAttributeScope(params.scope);
+        const scope = normalizeUserAttributeScope(params.scope);
         const message = typeof params.message === "string" ? params.message.trim() : "";
-        if (typeof match === "string" || !message) {
-          const error = typeof match === "string" ? match : "message is required.";
+        if (typeof match === "string" || scopeError || !message) {
+          const error =
+            typeof match === "string"
+              ? match
+              : scopeError
+                ? scopeError
+                : "message is required.";
           return {
             content: [{ type: "text" as const, text: error }],
             details: { error },
@@ -523,7 +604,8 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
         }
 
         const dryRun = params.dryRun === true;
-        const result = await router.sendUserAttributeMessage(match, message, { dryRun });
+        const options = scope ? { dryRun, scope } : { dryRun };
+        const result = await router.sendUserAttributeMessage(match, message, options);
         if (result.error) {
           return {
             content: [{ type: "text" as const, text: result.error }],
