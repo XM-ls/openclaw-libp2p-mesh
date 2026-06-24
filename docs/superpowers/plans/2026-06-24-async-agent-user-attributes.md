@@ -907,6 +907,11 @@ git commit -m "feat: refresh public attributes after profile save"
 
 ### Task 4: Prompt Guidance and Agent Tool Documentation
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `5dc95c8 docs: explain async user attribute extraction`
+**Notes:** README quick-start wording was also aligned in the working tree because that section already existed as an unrelated unstaged addition.
+
 **Files:**
 - Modify: `src/prompt-config.ts`
 - Test: `test/prompt-config.test.ts`
