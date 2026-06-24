@@ -535,6 +535,10 @@ git commit -m "feat: add libp2p mesh labels cli"
 
 ### 任务 4: 按属性发送支持 `scope=public|local|all`
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `97c4e0b` `feat: send user attribute messages by scope`; `a65a681` `fix: include scope in user attribute results`
+
 **Harness（测试框架）:**
 
 - **范围：** 扩展 router、类型和 agent tool 的 scope 支持；不改 CLI wizard，不改 README。
