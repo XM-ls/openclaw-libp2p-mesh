@@ -407,6 +407,10 @@ git commit -m "feat: add local peer labels wizard"
 
 ### 任务 3: 注册 `openclaw libp2p-mesh labels` CLI
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `e0f1fec` `feat: add libp2p mesh labels cli`
+
 **Harness（测试框架）:**
 
 - **范围：** 把 labels wizard 接入现有 `libp2p-mesh` root CLI；不改 router 发送逻辑。
