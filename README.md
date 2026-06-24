@@ -473,8 +473,10 @@ Tools are not configured in `openclaw.json`; they are registered automatically b
 
 There are two public sources:
 
-- `USER.md` tags are extracted read-only at gateway startup. The plugin never edits `USER.md`.
+- `USER.md` tags are produced asynchronously by the gateway. The gateway uses the OpenClaw-configured agent/API model to extract tags from `USER.md` without editing the file.
 - `user-profile.json` stores manually managed structured attributes such as group, project, role, skill, or a custom key.
+
+The initial base `instance-announce` may omit `userPublicAttributes`. After the gateway extracts `USER.md` tags and merges `user-profile.json`, it rebroadcasts a full `instance-announce` snapshot. If extraction is unavailable, `USER.md` tags are skipped; profile attributes still broadcast.
 
 By default, `USER.md` is read from:
 
@@ -494,7 +496,7 @@ Run the profile wizard to manage structured attributes:
 openclaw libp2p-mesh profile
 ```
 
-The wizard previews read-only `USER.md` tags and lets you add, edit, or remove only structured profile attributes. Tags extracted from `USER.md` are not written to `user-profile.json`; they are merged in memory with profile attributes and broadcast only in instance announce messages.
+The wizard previews read-only `USER.md` tags and lets you add, edit, or remove only structured profile attributes. Tags extracted from `USER.md` are not written to `user-profile.json`; they are merged in memory with profile attributes and broadcast only in full instance announce snapshots after asynchronous extraction completes.
 
 The default profile path is:
 

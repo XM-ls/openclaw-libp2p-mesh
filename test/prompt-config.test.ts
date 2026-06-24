@@ -26,6 +26,14 @@ test("agent prompt maps user wording to scope choices", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
 });
 
+test("agent prompt documents async USER.md public attributes", () => {
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /source="USER\.md"/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /异步/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /OpenClaw.*agent\/API 模型/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /省略 `userPublicAttributes`/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /普通对话 agent 不应自己读取 USER\.md/);
+});
+
 test("agent prompt requires dry run and send to keep selector scope and message identical", () => {
   assert.match(
     LIBP2P_MESH_AGENT_PROMPT,

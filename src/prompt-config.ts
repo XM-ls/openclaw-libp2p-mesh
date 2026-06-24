@@ -38,19 +38,26 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
 
 1. 必须使用 \`selector\` 参数，不要使用旧的 \`match.kind/key/value\` 参数。
 
-2. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\`, stay on this machine, and are used only when the send tool uses \`scope="local"\` or \`scope="all"\`.
+2. 公开属性来源：
 
-3. scope 规则：
+   - \`source="USER.md"\` 表示 gateway 使用 OpenClaw 已配置的 agent/API 模型，从 USER.md 异步提取并公开广播的 tag。
+   - \`source="profile"\` 表示用户通过 \`openclaw libp2p-mesh profile\` 手动配置的公开结构化属性。
+   - gateway 的基础 \`instance-announce\` 可能省略 \`userPublicAttributes\`；这表示本次 announce 没有携带属性，不一定表示该用户没有公开属性。按公开属性发送前先用 \`p2p_list_instances\` 查看当前实例记录。
+   - 普通对话 agent 不应自己读取 USER.md 来决定公开属性。USER.md 属性提取是 gateway 后台职责。
+
+3. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\`, stay on this machine, and are used only when the send tool uses \`scope="local"\` or \`scope="all"\`.
+
+4. scope 规则：
 
    - 默认是 \`scope="public"\`；default is scope="public"；省略 \`scope\` 时只匹配远端公开广播的 \`userPublicAttributes\`。
-   - \`scope="public"\` 匹配远端实例自己公开的属性，例如 USER.md tags 或 profile 属性。
+   - \`scope="public"\` 匹配远端公开广播的 \`userPublicAttributes\`，包括 USER.md 异步提取 tag 和 profile 属性。
    - \`scope="local"\` 只匹配本机通过 \`openclaw libp2p-mesh labels\` 给远端实例配置的本地标签。
-   - \`scope="all"\` 同时匹配 public 和 local 两个来源。
+   - \`scope="all"\` 同时匹配公开属性和本地标签。
    - 用户说“我归类”“我标记”或提到 labels/local labels/本地标签时，使用 \`scope="local"\`。
    - 用户说 public、公开、自己公开、对方公开时，使用 \`scope="public"\`。
    - 用户说 both、two sources、两个来源、公开和本地都算时，使用 \`scope="all"\`。
 
-4. selector 规则：
+5. selector 规则：
 
    - \`group=实验室\` 必须原样传入：
      - \`selector="group=实验室"\`
@@ -69,7 +76,7 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
 
    - \`实验室\` 这种裸值是歧义表达，不要自行改成 \`tag=实验室\` 或 \`tag:实验室\`，直接调用工具会返回歧义错误，或提示用户必须写成 \`group=实验室\` 或 \`tag:实验室\`。
 
-5. 群发前必须先 dry run：
+6. 群发前必须先 dry run：
 
    - 第一次调用：
      - \`dryRun=true\`
@@ -77,7 +84,7 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
      - \`scope\` 使用按上面规则判断出的 scope；如果没有明确本地或双来源意图，可省略，默认是 \`scope="public"\`
      - \`message\` 填用户要发送的原始消息内容
 
-6. 如果 dry run 匹配到目标，不需要再询问用户确认，立即再次调用同一个工具发送：
+7. 如果 dry run 匹配到目标，不需要再询问用户确认，立即再次调用同一个工具发送：
 
    - 第二次调用：
      - \`dryRun=false\`
@@ -86,11 +93,11 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
      - \`message\` 必须和 dry run 时一致
    - In English: dry run then actual send must use the same selector/scope/message.
 
-7. 如果 dry run 没有匹配目标，直接输出工具返回结果，不要猜测网络中还有其他未发现实例。
+8. 如果 dry run 没有匹配目标，直接输出工具返回结果，不要猜测网络中还有其他未发现实例。
 
-8. 不要手动在 \`message\` 前面拼接发送方 instanceId；插件会在接收侧元数据和展示文本中携带发送方 instanceId。
+9. 不要手动在 \`message\` 前面拼接发送方 instanceId；插件会在接收侧元数据和展示文本中携带发送方 instanceId。
 
-9. 按属性发送只匹配本机 \`instance-peer.json\` 中已发现的实例，不代表全网搜索。
+10. 按属性发送只匹配本机 \`instance-peer.json\` 中已发现的实例，不代表全网搜索。
 
 ## 三、查询和排障
 
