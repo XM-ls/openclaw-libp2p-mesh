@@ -380,6 +380,10 @@ git commit -m "feat: add libp2p mesh debug cli"
 
 ## 任务 5: README、最终验证与计划状态
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `8540ac4` `docs: document announce startup and logging`
+
 **Harness（测试框架）:**
 
 - **范围：** 更新 README，记录启动可靠性、`announceLogDetail`、`openclaw libp2p-mesh debug`、payload 隐私风险和排查步骤；运行最终验证并更新本计划状态。不修改功能代码。
