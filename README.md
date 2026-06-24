@@ -225,10 +225,33 @@ If `inboundTargets` is an empty array, inbound delivery is disabled. If `inbound
 | `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
 | `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
+| `announceLogDetail` | `"off" \| "summary" \| "payload"` | `"summary"` | Controls instance announce logging. `summary` logs peer, instance, address count, and attribute count; `payload` also logs the full announce JSON; `off` disables the new announce summary/payload logs. |
 | `inboundChannel` | `string` | `undefined` | OpenClaw channel used to display inbound P2P user messages, for example `"feishu"` |
 | `inboundTarget` | `string` | `undefined` | OpenClaw channel target for inbound P2P messages, for example `user:ou_xxx` or `chat:oc_xxx` |
 | `inboundTargets` | `array` | `undefined` | Optional list of receiver-owned channel targets for inbound P2P user messages. When present, it overrides `inboundChannel`/`inboundTarget`; an empty array disables inbound delivery. |
 | `deliveryAckTimeoutMs` | `number` | `15000` | Timeout for waiting on remote channel delivery ACKs |
+
+### Announce Startup and Logging
+
+During gateway startup, `libp2p-mesh` registers the instance router handlers and direct/broadcast inbound handlers before starting the mesh node. This makes early `instance-announce` messages observable as soon as peers connect, instead of waiting until after mesh startup has already completed.
+
+Instance announce logs are controlled by `plugins.entries["libp2p-mesh"].config.announceLogDetail`:
+
+- `summary` is the default. It logs send/receive direction, peer ID, instance ID, multiaddr count, and public attribute count. It does not print the full announce JSON.
+- `off` disables the new announce summary and payload logs while keeping warnings and errors.
+- `payload` logs the same summary plus the full announce JSON at debug level.
+
+Use the debug command to inspect or change this value:
+
+```bash
+openclaw libp2p-mesh debug
+```
+
+Full payload logging is intended for short-lived troubleshooting only. Announce payloads can include `userPublicAttributes`, peer multiaddrs, the instance pubkey, and instance identity fields. After changing the setting, restart the gateway for the new logging level to take effect:
+
+```bash
+openclaw gateway restart
+```
 
 ## NAT Traversal
 
@@ -615,6 +638,20 @@ Peer connection and disconnection are logged at `info` level:
 ```
 
 If these lines are missing, confirm the gateway is running with normal info logs enabled and that both instances are on the same mDNS, bootstrap, or relay network.
+
+### Instance announce routes are missing between two machines
+
+If peers connect but sending by OpenClaw instance ID fails or `instance-peer.json` is not updated, first confirm both gateways were restarted after the latest config change. On startup, the gateway now attaches the instance router plus inbound message handlers before starting the mesh, so early announces should be handled once the peer connection appears.
+
+For a short debug session on both computers:
+
+1. Run `openclaw libp2p-mesh debug`.
+2. Set `announceLogDetail` to `payload` and confirm the privacy warning.
+3. Restart both gateways with `openclaw gateway restart`.
+4. Watch for summary lines and debug lines containing full announce payload JSON.
+5. Return to `summary` or `off` with `openclaw libp2p-mesh debug`, then restart again.
+
+Full payload logs may expose `userPublicAttributes`, multiaddrs, pubkey, and instance identity, so avoid sharing these logs outside the debugging context.
 
 ## Architecture
 
