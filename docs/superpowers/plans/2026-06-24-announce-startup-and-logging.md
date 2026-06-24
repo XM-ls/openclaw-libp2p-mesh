@@ -201,6 +201,10 @@ git commit -m "fix: register mesh handlers before startup"
 
 ## 任务 3: announce 日志配置与输出
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `9bb50fd` `feat: add announce log detail`, `5dd7174` `fix: preserve instance mapping logs`, `fcc0a01` `fix: preserve announce sent logs`
+
 **Harness（测试框架）:**
 
 - **范围：** 新增 `announceLogDetail` 配置，支持 `off` / `summary` / `payload`；发送和接收 announce 时按配置打印日志。不新增 debug CLI，不修改启动顺序。
