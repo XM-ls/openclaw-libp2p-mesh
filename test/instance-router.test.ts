@@ -77,12 +77,19 @@ function makeStore(records: InstancePeerRecord[]): InstancePeerStore {
       record.instanceName = payload.instanceName;
       record.multiaddrs = payload.multiaddrs;
       record.pubkey = payload.pubkey;
+      record.userPublicAttributes =
+        "userPublicAttributes" in payload
+          ? payload.userPublicAttributes
+          : previous?.userPublicAttributes;
       record.lastAnnouncedAt = payload.announcedAt;
       byInstance.set(payload.instanceId, record);
 
       return {
         record,
-        changed: !previous || previous.peerId !== payload.peerId,
+        changed:
+          !previous ||
+          previous.peerId !== payload.peerId ||
+          previous.userPublicAttributes !== record.userPublicAttributes,
         peerIdSharedBy: [],
       };
     },
@@ -421,6 +428,77 @@ test("sendInstanceMessage returns ACK target results to tool layer", async () =>
   assert.deepEqual(result.deliveryResults, deliveryResults);
 });
 
+test("received base announce preserves existing attributes and explicit empty clears them", async () => {
+  const userMdTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "ResearchLoop",
+    label: "ResearchLoop",
+    source: "USER.md",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh([]),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  await router.handleMessage({
+    id: "announce-attrs",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      multiaddrs: [],
+      userPublicAttributes: [userMdTag],
+      announcedAt: 10,
+    }),
+    timestamp: 1,
+  });
+  await router.handleMessage({
+    id: "announce-base",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      multiaddrs: [],
+      announcedAt: 11,
+    }),
+    timestamp: 2,
+  });
+
+  assert.deepEqual(
+    (await router.resolveInstance("remote-instance"))?.userPublicAttributes,
+    [userMdTag],
+  );
+
+  await router.handleMessage({
+    id: "announce-empty",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      multiaddrs: [],
+      userPublicAttributes: [],
+      announcedAt: 12,
+    }),
+    timestamp: 3,
+  });
+
+  assert.deepEqual(
+    (await router.resolveInstance("remote-instance"))?.userPublicAttributes,
+    [],
+  );
+});
+
 test("announceToPeer sends base announce first without userPublicAttributes then refreshes attributes", async () => {
   const sent: SentMessage[] = [];
   let refreshCalls = 0;
@@ -462,7 +540,7 @@ test("announceToPeer sends base announce first without userPublicAttributes then
   });
 
   await router.announceToPeer("remote-peer");
-  await flushMicrotasks();
+  await router.refreshPublicAttributes();
 
   assert.equal(refreshCalls, 1);
   assert.equal(sent.length, 2);
@@ -470,6 +548,61 @@ test("announceToPeer sends base announce first without userPublicAttributes then
   const attributePayload = JSON.parse(sent[1].message.payload);
   assert.equal("userPublicAttributes" in basePayload, false);
   assert.deepEqual(attributePayload.userPublicAttributes, [userMdTag, profileAttribute]);
+});
+
+test("queued attribute refresh includes peers announced during slow refresh", async () => {
+  const sent: SentMessage[] = [];
+  let releaseRefresh: (() => void) | undefined;
+  const refreshStarted = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  const userMdTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "Async",
+    label: "Async",
+    source: "USER.md",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    userAttributeSource: {
+      async loadTags() {
+        return [];
+      },
+      async refreshTags() {
+        await refreshStarted;
+        return [userMdTag];
+      },
+    },
+  });
+
+  await router.announceToPeer("peer-a");
+  await router.announceToPeer("peer-b");
+  releaseRefresh?.();
+  await router.refreshPublicAttributes();
+
+  assert.deepEqual(
+    sent.map((entry) => [entry.peerId, entry.message.type]),
+    [
+      ["peer-a", "instance-announce"],
+      ["peer-b", "instance-announce"],
+      ["peer-a", "instance-announce"],
+      ["peer-b", "instance-announce"],
+    ],
+  );
+  assert.equal("userPublicAttributes" in JSON.parse(sent[0].message.payload), false);
+  assert.equal("userPublicAttributes" in JSON.parse(sent[1].message.payload), false);
+  assert.deepEqual(JSON.parse(sent[2].message.payload).userPublicAttributes, [
+    userMdTag,
+  ]);
+  assert.deepEqual(JSON.parse(sent[3].message.payload).userPublicAttributes, [
+    userMdTag,
+  ]);
 });
 
 test("refreshPublicAttributes rebroadcasts a full attribute announce to connected peers", async () => {

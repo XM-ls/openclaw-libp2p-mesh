@@ -66,13 +66,15 @@ function sameRecord(
 
   const recordAttributes = normalizeUserPublicAttributes(record.userPublicAttributes);
   const payloadAttributes = normalizeUserPublicAttributes(payload.userPublicAttributes);
+  const payloadIncludesAttributes = "userPublicAttributes" in payload;
 
   return (
     record.peerId === payload.peerId &&
     record.instanceName === payload.instanceName &&
     record.pubkey === payload.pubkey &&
     sameStringArray(record.multiaddrs, payload.multiaddrs) &&
-    sameUserPublicAttributes(recordAttributes, payloadAttributes) &&
+    (!payloadIncludesAttributes ||
+      sameUserPublicAttributes(recordAttributes, payloadAttributes)) &&
     record.lastAnnouncedAt === payload.announcedAt
   );
 }
@@ -187,7 +189,10 @@ export function createInstancePeerStore(options?: {
       return runMutation(async () => {
         const table = await load();
         const existing = table.instances[payload.instanceId];
-        const userPublicAttributes = normalizeUserPublicAttributes(payload.userPublicAttributes);
+        const userPublicAttributes =
+          "userPublicAttributes" in payload
+            ? normalizeUserPublicAttributes(payload.userPublicAttributes)
+            : normalizeUserPublicAttributes(existing?.userPublicAttributes);
         const changed = !sameRecord(existing, payload);
         const record: InstancePeerRecord = {
           instanceId: payload.instanceId,

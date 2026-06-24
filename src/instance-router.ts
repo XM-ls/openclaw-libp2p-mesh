@@ -213,6 +213,8 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   const pendingAcks = new Map<string, PendingAck>();
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
   const unsubs: Array<() => void> = [];
+  const pendingAttributePeers = new Set<string>();
+  const activeAttributePeers = new Set<string>();
   let attributeRefreshPromise: Promise<void> | undefined;
 
   function localInstanceId(): string {
@@ -317,19 +319,45 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
   function queueAttributeRefresh(extraPeerId?: string): void {
     const peers = attributeAnnouncePeers(extraPeerId);
-    if (peers.length === 0 || attributeRefreshPromise) {
+    for (const peerId of peers) {
+      pendingAttributePeers.add(peerId);
+    }
+
+    if (pendingAttributePeers.size === 0 && !attributeRefreshPromise) {
       return;
     }
 
-    attributeRefreshPromise = sendAttributeAnnounceToPeers(peers)
-      .catch((error) => {
-        logger?.warn?.(
-          `[libp2p-mesh] Failed to refresh public attributes: ${summarizeError(error)}`,
-        );
-      })
-      .finally(() => {
+    drainAttributeRefresh();
+  }
+
+  function drainAttributeRefresh(): Promise<void> {
+    if (!attributeRefreshPromise) {
+      attributeRefreshPromise = (async () => {
+        while (pendingAttributePeers.size > 0) {
+          const peers = [...pendingAttributePeers];
+          pendingAttributePeers.clear();
+          for (const peerId of peers) {
+            activeAttributePeers.add(peerId);
+          }
+          try {
+            await sendAttributeAnnounceToPeers(peers).catch((error) => {
+              logger?.warn?.(
+                `[libp2p-mesh] Failed to refresh public attributes: ${summarizeError(error)}`,
+              );
+            });
+          } finally {
+            for (const peerId of activeAttributePeers) {
+              pendingAttributePeers.delete(peerId);
+            }
+            activeAttributePeers.clear();
+          }
+        }
+      })().finally(() => {
         attributeRefreshPromise = undefined;
       });
+    }
+
+    return attributeRefreshPromise;
   }
 
   async function announceToPeer(peerId: string): Promise<void> {
@@ -350,17 +378,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   }
 
   async function refreshPublicAttributes(): Promise<void> {
-    if (attributeRefreshPromise) {
-      await attributeRefreshPromise;
-      return;
+    for (const peerId of attributeAnnouncePeers()) {
+      pendingAttributePeers.add(peerId);
     }
 
-    attributeRefreshPromise = sendAttributeAnnounceToPeers(attributeAnnouncePeers()).finally(
-      () => {
-        attributeRefreshPromise = undefined;
-      },
-    );
-    await attributeRefreshPromise;
+    await drainAttributeRefresh();
   }
 
   function announceSummary(
