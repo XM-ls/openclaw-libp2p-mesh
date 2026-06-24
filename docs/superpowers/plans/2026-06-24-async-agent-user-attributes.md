@@ -39,6 +39,10 @@
 
 ### Task 1: USER.md Agent Attribute Source and Cache
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `2718ced feat: add agent user md attribute source`, `4e9a142 fix: avoid user md cache temp collisions`
+
 **Files:**
 - Create: `src/user-md-agent-attributes.ts`
 - Test: `test/user-md-agent-attributes.test.ts`
@@ -426,6 +430,10 @@ git commit -m "feat: add agent user md attribute source"
 
 ### Task 2: Two-Phase Instance Announce and Refresh API
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `721bf33 feat: announce public attributes asynchronously`, `09377b8 fix: preserve profile attributes on user md refresh failure`, `b4acb8b fix: stabilize async attribute announce refresh`
+
 **Files:**
 - Modify: `src/types.ts`
 - Modify: `src/instance-router.ts`
@@ -758,6 +766,10 @@ git commit -m "feat: announce public attributes asynchronously"
 ---
 
 ### Task 3: Plugin and Profile CLI Wiring
+
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `80037ce feat: refresh public attributes after profile save`
 
 **Files:**
 - Modify: `src/plugin.ts`
