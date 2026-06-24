@@ -226,18 +226,27 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   async function loadUserPublicAttributes(loadOptions?: {
     refreshUserMd?: boolean;
   }): Promise<UserPublicAttribute[]> {
-    const userMdTags = loadOptions?.refreshUserMd && options.userAttributeSource?.refreshTags
-      ? await options.userAttributeSource.refreshTags()
-      : await (options.userAttributeSource?.loadTags() ?? Promise.resolve([]));
+    const userMdPromise = loadOptions?.refreshUserMd && options.userAttributeSource?.refreshTags
+      ? options.userAttributeSource.refreshTags()
+      : options.userAttributeSource?.loadTags() ?? Promise.resolve([]);
 
-    const profileAttributes = await (
+    const profilePromise =
       options.userProfileStore?.listAttributes().catch((error) => {
         logger?.warn?.(
           `[libp2p-mesh] Failed to load profile public attributes: ${summarizeError(error)}`,
         );
         return [];
-      }) ?? Promise.resolve([])
-    );
+      }) ?? Promise.resolve([]);
+
+    const [userMdTags, profileAttributes] = await Promise.all([
+      userMdPromise.catch((error) => {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to load USER.md public attributes: ${summarizeError(error)}`,
+        );
+        return [];
+      }),
+      profilePromise,
+    ]);
 
     return mergeUserPublicAttributes(userMdTags, profileAttributes);
   }

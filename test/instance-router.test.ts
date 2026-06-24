@@ -322,6 +322,7 @@ test("announceToConnectedPeers sends announces without attaching handlers", asyn
   });
 
   await router.announceToConnectedPeers();
+  await flushMicrotasks();
 
   assert.equal(mesh.messageRegistrationCount, 0);
   assert.equal(mesh.peerConnectRegistrationCount, 0);
@@ -329,11 +330,13 @@ test("announceToConnectedPeers sends announces without attaching handlers", asyn
     sent.map((item) => [item.peerId, item.message.type]),
     [
       ["peer-a", "instance-announce"],
-      ["peer-a", "instance-announce"],
       ["peer-b", "instance-announce"],
+      ["peer-a", "instance-announce"],
       ["peer-b", "instance-announce"],
     ],
   );
+  assert.equal("userPublicAttributes" in JSON.parse(sent[0].message.payload), false);
+  assert.equal("userPublicAttributes" in JSON.parse(sent[1].message.payload), false);
 });
 
 test("start attaches handlers once then announces to connected peers", async () => {
@@ -350,6 +353,7 @@ test("start attaches handlers once then announces to connected peers", async () 
   });
 
   await router.start();
+  await flushMicrotasks();
 
   assert.equal(mesh.messageRegistrationCount, 1);
   assert.equal(mesh.peerConnectRegistrationCount, 1);
@@ -505,9 +509,16 @@ test("refreshPublicAttributes rebroadcasts a full attribute announce to connecte
   }
 });
 
-test("attribute refresh failure does not reject announceToPeer", async () => {
+test("attribute refresh failure keeps profile attributes in announceToPeer refresh", async () => {
   const sent: SentMessage[] = [];
   const { logs, logger } = makeLogger();
+  const profileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "libp2p-mesh",
+    label: "libp2p-mesh",
+    source: "profile",
+  };
   const router = createInstanceRouter({
     mesh: makeMesh(sent),
     store: makeStore([]),
@@ -525,13 +536,65 @@ test("attribute refresh failure does not reject announceToPeer", async () => {
         throw new Error("model failed");
       },
     },
+    userProfileStore: {
+      async listAttributes() {
+        return [profileAttribute];
+      },
+    },
   });
 
   await router.announceToPeer("remote-peer");
   await flushMicrotasks();
 
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.equal("userPublicAttributes" in JSON.parse(sent[0].message.payload), false);
+  assert.deepEqual(JSON.parse(sent[1].message.payload).userPublicAttributes, [
+    profileAttribute,
+  ]);
+  assert.equal(logs.warn.some((message) => message.includes("model failed")), true);
+});
+
+test("refreshPublicAttributes keeps profile attributes when USER.md refresh fails", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const profileAttribute: UserPublicAttribute = {
+    kind: "structured",
+    key: "role",
+    value: "maintainer",
+    label: "role: maintainer",
+    source: "profile",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent, { connectedPeers: ["peer-a"] }),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    logger,
+    userAttributeSource: {
+      async loadTags() {
+        return [];
+      },
+      async refreshTags() {
+        throw new Error("model failed");
+      },
+    },
+    userProfileStore: {
+      async listAttributes() {
+        return [profileAttribute];
+      },
+    },
+  });
+
+  await router.refreshPublicAttributes();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].peerId, "peer-a");
+  assert.deepEqual(JSON.parse(sent[0].message.payload).userPublicAttributes, [
+    profileAttribute,
+  ]);
   assert.equal(logs.warn.some((message) => message.includes("model failed")), true);
 });
 
