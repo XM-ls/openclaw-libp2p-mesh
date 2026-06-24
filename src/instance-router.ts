@@ -248,6 +248,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     changed?: boolean,
   ): void {
     if (announceLogDetail === "off") {
+      if (direction === "Sent") {
+        logger?.info?.(
+          `[libp2p-mesh] Sent instance announce to ${peerId} (${payload.instanceId})`,
+        );
+      }
       return;
     }
 
