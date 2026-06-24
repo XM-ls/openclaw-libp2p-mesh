@@ -40,6 +40,10 @@
 
 ## 任务 1: 拆分 InstanceRouter 生命周期
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `37d180d` `fix: attach instance router before mesh startup`
+
 **Harness（测试框架）:**
 
 - **范围：** 在 `InstanceRouter` 中新增幂等 `attachHandlers()` 和公开 `announceToConnectedPeers()`；保留 `start()` 兼容行为。不修改 `plugin.ts` 启动顺序，不实现 debug CLI。
