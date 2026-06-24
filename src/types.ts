@@ -203,6 +203,8 @@ export type InstanceRouterOptions = {
 };
 
 export interface InstanceRouter {
+  attachHandlers(): void;
+  announceToConnectedPeers(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   handleMessage(msg: P2PMessage): Promise<void>;

@@ -17,6 +17,18 @@ type SentMessage = {
   message: Parameters<MeshNetwork["sendStructuredMessage"]>[1];
 };
 
+type MessageHandler = Parameters<MeshNetwork["onMessage"]>[0];
+type PeerConnectHandler = Parameters<MeshNetwork["onPeerConnect"]>[0];
+
+type FakeMesh = MeshNetwork & {
+  messageHandlers: Set<MessageHandler>;
+  peerConnectHandlers: Set<PeerConnectHandler>;
+  messageRegistrationCount: number;
+  peerConnectRegistrationCount: number;
+  emitMessage(msg: P2PMessage): void;
+  emitPeerConnect(peerId: string): void;
+};
+
 function makeRecord(
   instanceId: string,
   peerId: string,
@@ -69,19 +81,53 @@ function makeStore(records: InstancePeerRecord[]): InstancePeerStore {
   };
 }
 
-function makeMesh(sent: SentMessage[]): MeshNetwork {
+function makeMesh(
+  sent: SentMessage[],
+  options: { connectedPeers?: string[] } = {},
+): FakeMesh {
+  const messageHandlers = new Set<MessageHandler>();
+  const peerConnectHandlers = new Set<PeerConnectHandler>();
+  let messageRegistrationCount = 0;
+  let peerConnectRegistrationCount = 0;
+
   return {
+    messageHandlers,
+    peerConnectHandlers,
+    get messageRegistrationCount() {
+      return messageRegistrationCount;
+    },
+    get peerConnectRegistrationCount() {
+      return peerConnectRegistrationCount;
+    },
+    emitMessage(msg) {
+      for (const handler of messageHandlers) {
+        handler(msg);
+      }
+    },
+    emitPeerConnect(peerId) {
+      for (const handler of peerConnectHandlers) {
+        handler(peerId);
+      }
+    },
     async start() {},
     async stop() {},
     async sendToPeer() {},
     async sendStructuredMessage(peerId, message) {
       sent.push({ peerId, message });
     },
-    onMessage() {
-      return () => {};
+    onMessage(handler) {
+      messageRegistrationCount += 1;
+      messageHandlers.add(handler);
+      return () => {
+        messageHandlers.delete(handler);
+      };
     },
-    onPeerConnect() {
-      return () => {};
+    onPeerConnect(handler) {
+      peerConnectRegistrationCount += 1;
+      peerConnectHandlers.add(handler);
+      return () => {
+        peerConnectHandlers.delete(handler);
+      };
     },
     onPeerDisconnect() {
       return () => {};
@@ -92,7 +138,7 @@ function makeMesh(sent: SentMessage[]): MeshNetwork {
       return "local-peer";
     },
     getConnectedPeers() {
-      return [];
+      return options.connectedPeers ?? [];
     },
     getMultiaddrs() {
       return [];
@@ -129,6 +175,10 @@ function makeMesh(sent: SentMessage[]): MeshNetwork {
   };
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function makeUserMessage(messageId = "message-1"): P2PMessage {
   return {
     id: messageId,
@@ -162,6 +212,109 @@ function parseAcks(sent: SentMessage[]) {
     .filter((item) => item.message.type === "delivery-ack")
     .map((item) => JSON.parse(item.message.payload));
 }
+
+test("attachHandlers is idempotent and stores announces received before startup announce", async () => {
+  const sent: SentMessage[] = [];
+  const mesh = makeMesh(sent);
+  const store = makeStore([]);
+  const router = createInstanceRouter({
+    mesh,
+    store,
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  router.attachHandlers();
+  router.attachHandlers();
+
+  assert.equal(mesh.messageRegistrationCount, 1);
+  assert.equal(mesh.peerConnectRegistrationCount, 1);
+  assert.equal(mesh.messageHandlers.size, 1);
+  assert.equal(mesh.peerConnectHandlers.size, 1);
+
+  mesh.emitMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      instanceName: "remote",
+      multiaddrs: ["/ip4/127.0.0.1/tcp/2/p2p/remote-peer"],
+      pubkey: "remote-pubkey",
+      announcedAt: 10,
+    }),
+    timestamp: 1,
+  });
+  await flushMicrotasks();
+
+  assert.equal((await router.resolveInstance("remote-instance"))?.peerId, "remote-peer");
+
+  await router.stop();
+  assert.equal(mesh.messageHandlers.size, 0);
+  assert.equal(mesh.peerConnectHandlers.size, 0);
+
+  router.attachHandlers();
+  assert.equal(mesh.messageRegistrationCount, 2);
+  assert.equal(mesh.peerConnectRegistrationCount, 2);
+  assert.equal(mesh.messageHandlers.size, 1);
+  assert.equal(mesh.peerConnectHandlers.size, 1);
+});
+
+test("announceToConnectedPeers sends announces without attaching handlers", async () => {
+  const sent: SentMessage[] = [];
+  const mesh = makeMesh(sent, {
+    connectedPeers: ["peer-a", "local-peer", "peer-b"],
+  });
+  const router = createInstanceRouter({
+    mesh,
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  await router.announceToConnectedPeers();
+
+  assert.equal(mesh.messageRegistrationCount, 0);
+  assert.equal(mesh.peerConnectRegistrationCount, 0);
+  assert.deepEqual(
+    sent.map((item) => [item.peerId, item.message.type]),
+    [
+      ["peer-a", "instance-announce"],
+      ["peer-b", "instance-announce"],
+    ],
+  );
+});
+
+test("start attaches handlers once then announces to connected peers", async () => {
+  const sent: SentMessage[] = [];
+  const mesh = makeMesh(sent, { connectedPeers: ["peer-a"] });
+  const router = createInstanceRouter({
+    mesh,
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  await router.start();
+
+  assert.equal(mesh.messageRegistrationCount, 1);
+  assert.equal(mesh.peerConnectRegistrationCount, 1);
+  assert.deepEqual(
+    sent.map((item) => [item.peerId, item.message.type]),
+    [["peer-a", "instance-announce"]],
+  );
+});
 
 test("sendInstanceMessage returns ACK target results to tool layer", async () => {
   const sent: SentMessage[] = [];

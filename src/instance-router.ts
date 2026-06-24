@@ -449,7 +449,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
   }
 
-  async function start(): Promise<void> {
+  function attachHandlers(): void {
+    if (unsubs.length > 0) {
+      return;
+    }
+
     unsubs.push(
       mesh.onMessage((msg) => {
         handleMessage(msg).catch((error) => {
@@ -468,7 +472,10 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
         });
       }),
     );
+  }
 
+  async function start(): Promise<void> {
+    attachHandlers();
     await announceToConnectedPeers();
   }
 
@@ -658,6 +665,8 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   }
 
   return {
+    attachHandlers,
+    announceToConnectedPeers,
     start,
     stop,
     handleMessage,
