@@ -688,6 +688,10 @@ git commit -m "feat: send user attribute messages by scope"
 
 ### 任务 5: 系统提示词、README 和最终验证
 
+**Status:** ✅ COMPLETE
+**Completed:** 2026-06-24
+**Commits:** `e21ad39` `docs: document local peer labels`
+
 **Harness（测试框架）:**
 
 - **范围：** 更新提示词、工具描述文档和 README；运行完整验证；不新增功能代码。
@@ -708,13 +712,13 @@ git commit -m "feat: send user attribute messages by scope"
 
 **行为清单（Behavior List）:**
 
-- [ ] 系统提示词说明 `openclaw libp2p-mesh labels` 管理本机给远端实例配置的本地标签。
-- [ ] 系统提示词说明 `scope=public/local/all` 的选择规则。
-- [ ] 系统提示词明确默认 `scope=public`。
-- [ ] 系统提示词要求 dry run 后用相同 `selector/scope/message` 发送。
-- [ ] README 说明 `peer-labels.json` 格式和隐私边界。
-- [ ] README 给出 public/local/all 三个发送示例。
-- [ ] 最终运行 `npm test` 和 `npm run build`。
+- [x] 系统提示词说明 `openclaw libp2p-mesh labels` 管理本机给远端实例配置的本地标签。
+- [x] 系统提示词说明 `scope=public/local/all` 的选择规则。
+- [x] 系统提示词明确默认 `scope=public`。
+- [x] 系统提示词要求 dry run 后用相同 `selector/scope/message` 发送。
+- [x] README 说明 `peer-labels.json` 格式和隐私边界。
+- [x] README 给出 public/local/all 三个发送示例。
+- [x] 最终运行 `npm test` 和 `npm run build`。
 
 **接口合同（Interface Contract）:**
 
@@ -728,7 +732,7 @@ git commit -m "feat: send user attribute messages by scope"
 // - 默认使用 scope="public"
 ```
 
-- [ ] **步骤 1：编写失败的测试** (Red)
+- [x] **步骤 1：编写失败的测试** (Red)
 
 创建 `test/prompt-config.test.ts`：
 
@@ -759,18 +763,18 @@ assert.match(tool.description, /scope="local"/);
 运行：`npm test -- test/prompt-config.test.ts test/agent-tools.test.ts`  
 预期：FAIL，原因是 prompt/schema 文案尚未更新。
 
-- [ ] **步骤 2：运行测试确认失败** (Red)
+- [x] **步骤 2：运行测试确认失败** (Red)
 
 确认失败原因是缺少 prompt 或 schema 文案，不是 import 路径问题。
 
-- [ ] **步骤 3：编写最小实现** (Green)
+- [x] **步骤 3：编写最小实现** (Green)
 
 修改 `src/prompt-config.ts` 和 agent tool description。更新 `README.md` 的 User public attributes 章节，新增 `labels` 命令、`peer-labels.json` 示例、`scope` 示例和隐私边界。
 
 运行：`npm test -- test/prompt-config.test.ts test/agent-tools.test.ts`  
 预期：PASS。
 
-- [ ] **步骤 4：运行测试确认通过** (Green)
+- [x] **步骤 4：运行测试确认通过** (Green)
 
 运行：
 
@@ -790,25 +794,25 @@ git add src/prompt-config.ts README.md test/prompt-config.test.ts test/agent-too
 git commit -m "docs: document local peer labels"
 ```
 
-- [ ] **步骤 6：验证 spec 合规（自检）**
+- [x] **步骤 6：验证 spec 合规（自检）**
 
-- [ ] README 没有把本地标签描述成广播属性。
-- [ ] prompt 没有要求默认使用 `local` 或 `all`。
-- [ ] prompt 明确本地归类才使用 `scope="local"`。
-- [ ] 完整测试和 build 输出已记录在最终回复。
+- [x] README 没有把本地标签描述成广播属性。
+- [x] prompt 没有要求默认使用 `local` 或 `all`。
+- [x] prompt 明确本地归类才使用 `scope="local"`。
+- [x] 完整测试和 build 输出已记录在最终回复。
 
 ---
 
 ## 最终质量门
 
-- [ ] `npm test` 通过。
-- [ ] `npm run build` 通过。
-- [ ] `openclaw libp2p-mesh labels` 已注册在同一个 `libp2p-mesh` root command 下。
-- [ ] `peer-labels.json` 只保存 `{ key, value }`。
-- [ ] `p2p_send_user_attribute_message` 默认仍按公开属性发送。
-- [ ] `scope=local` 的 dry run 和发送都能匹配本地标签。
-- [ ] prompt 和 README 都解释了 public/local/all。
-- [ ] 没有 TODO、TBD 或占位符。
+- [x] `npm test` 通过。
+- [x] `npm run build` 通过。
+- [x] `openclaw libp2p-mesh labels` 已注册在同一个 `libp2p-mesh` root command 下。
+- [x] `peer-labels.json` 只保存 `{ key, value }`。
+- [x] `p2p_send_user_attribute_message` 默认仍按公开属性发送。
+- [x] `scope=local` 的 dry run 和发送都能匹配本地标签。
+- [x] prompt 和 README 都解释了 public/local/all。
+- [x] 没有 TODO、TBD 或占位符。
 
 ## Spec 覆盖自检
 
