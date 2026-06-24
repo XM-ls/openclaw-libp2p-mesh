@@ -234,6 +234,7 @@ export interface MeshConfig {
   discovery?: "mdns" | "bootstrap" | "dht";
   bootstrapList?: string[];
   meshTopic?: string;
+  announceLogDetail?: AnnounceLogDetail;
   enableAgentSync?: boolean;
   enableWebSocket?: boolean;
   peerIdPath?: string;
@@ -336,6 +337,8 @@ export interface MeshNetwork {
   /** Inspect which NAT-traversal services are running and whether any relay reservations are active */
   getNATStatus(): NATTraversalStatus;
 }
+
+export type AnnounceLogDetail = "off" | "summary" | "payload";
 
 export type MeshAccount = {
   accountId: string;

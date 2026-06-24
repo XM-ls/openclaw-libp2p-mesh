@@ -35,6 +35,12 @@
             "type": "string",
             "default": "openclaw-mesh"
           },
+          "announceLogDetail": {
+            "type": "string",
+            "enum": ["off", "summary", "payload"],
+            "default": "summary",
+            "description": "Controls instance announce logging detail."
+          },
           "inboundTargets": {
             "type": "array",
             "items": {
@@ -81,6 +87,12 @@
       "meshTopic": {
         "type": "string",
         "default": "openclaw-mesh"
+      },
+      "announceLogDetail": {
+        "type": "string",
+        "enum": ["off", "summary", "payload"],
+        "default": "summary",
+        "description": "Controls instance announce logging detail."
       },
       "enablePubsub": {
         "type": "boolean",

@@ -1,4 +1,5 @@
 import type {
+  AnnounceLogDetail,
   DeliveryAckPayload,
   DeliveryTargetResult,
   InboundTargetConfig,
@@ -48,6 +49,20 @@ function isNonEmptyString(value: unknown): value is string {
 
 function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function effectiveAnnounceLogDetail(value: unknown): AnnounceLogDetail {
+  if (value === "off" || value === "payload") {
+    return value;
+  }
+
+  return "summary";
+}
+
+function countAnnounceAttributes(payload: InstanceAnnouncePayload): number {
+  return Array.isArray(payload.userPublicAttributes)
+    ? payload.userPublicAttributes.length
+    : 0;
 }
 
 function describeAttributeMatch(match: UserAttributeMatch): string {
@@ -149,6 +164,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   const { mesh, store, delivery } = options;
   const config = options.config ?? {};
   const logger = options.logger;
+  const announceLogDetail = effectiveAnnounceLogDetail(config.announceLogDetail);
   const ackTimeoutMs = config.deliveryAckTimeoutMs ?? 15000;
   const announcedPeers = new Set<string>();
   const pendingAcks = new Map<string, PendingAck>();
@@ -212,9 +228,41 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       payload: JSON.stringify(payload),
     });
     announcedPeers.add(peerId);
-    logger?.info?.(
-      `[libp2p-mesh] Sent instance announce to ${peerId} (${payload.instanceId})`,
-    );
+    logAnnounce("Sent", peerId, payload);
+  }
+
+  function announceSummary(
+    direction: "Sent" | "Received",
+    peerId: string,
+    payload: InstanceAnnouncePayload,
+    changed?: boolean,
+  ): string {
+    const changedDetail = changed === undefined ? "" : ` changed=${changed}`;
+    return `[libp2p-mesh] ${direction} instance announce peer=${peerId} instance=${payload.instanceId} addrs=${payload.multiaddrs.length} attrs=${countAnnounceAttributes(payload)}${changedDetail}`;
+  }
+
+  function logAnnounce(
+    direction: "Sent" | "Received",
+    peerId: string,
+    payload: InstanceAnnouncePayload,
+    changed?: boolean,
+  ): void {
+    if (announceLogDetail === "off") {
+      return;
+    }
+
+    logger?.info?.(announceSummary(direction, peerId, payload, changed));
+    if (announceLogDetail !== "payload") {
+      return;
+    }
+
+    try {
+      logger?.debug?.(
+        `[libp2p-mesh] ${direction} instance announce payload=${JSON.stringify(payload)}`,
+      );
+    } catch {
+      return;
+    }
   }
 
   async function announceToConnectedPeers(): Promise<void> {
@@ -251,13 +299,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     const result = await store.upsertFromAnnounce(payload);
-    if (result.changed) {
-      logger?.info?.(
-        `[libp2p-mesh] Instance mapping updated: ${payload.instanceId} -> ${payload.peerId}`,
-      );
-    } else {
-      logger?.debug?.(`[libp2p-mesh] Instance mapping unchanged: ${payload.instanceId}`);
-    }
+    logAnnounce("Received", msg.from, payload, result.changed);
 
     if (!announcedPeers.has(msg.from)) {
       await announceToPeer(msg.from).catch((error) => {

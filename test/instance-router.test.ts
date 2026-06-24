@@ -20,6 +20,13 @@ type SentMessage = {
 type MessageHandler = Parameters<MeshNetwork["onMessage"]>[0];
 type PeerConnectHandler = Parameters<MeshNetwork["onPeerConnect"]>[0];
 
+type CapturedLogs = {
+  info: string[];
+  debug: string[];
+  warn: string[];
+  error: string[];
+};
+
 type FakeMesh = MeshNetwork & {
   messageHandlers: Set<MessageHandler>;
   peerConnectHandlers: Set<PeerConnectHandler>;
@@ -171,6 +178,26 @@ function makeMesh(
         reservedRelays: [],
         hasRelayedListenAddr: false,
       };
+    },
+  };
+}
+
+function makeLogger(logs: CapturedLogs = { info: [], debug: [], warn: [], error: [] }) {
+  return {
+    logs,
+    logger: {
+      info(message: string) {
+        logs.info.push(message);
+      },
+      debug(message: string) {
+        logs.debug.push(message);
+      },
+      warn(message: string) {
+        logs.warn.push(message);
+      },
+      error(message: string) {
+        logs.error.push(message);
+      },
     },
   };
 }
@@ -420,6 +447,236 @@ test("announceToPeer sends merged USER.md and profile user public attributes", a
   assert.equal(sent[0].message.type, "instance-announce");
   const payload = JSON.parse(sent[0].message.payload);
   assert.deepEqual(payload.userPublicAttributes, [userMdTag, profileAttribute]);
+});
+
+test("announce logging summary mode records send and receive counts", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    config: {
+      announceLogDetail: "summary",
+    },
+    logger,
+    userAttributeSource: {
+      async loadTags() {
+        return [
+          {
+            kind: "tag",
+            value: "ResearchLoop",
+            label: "ResearchLoop",
+            source: "USER.md",
+          },
+        ];
+      },
+    },
+  });
+
+  await router.announceToPeer("remote-peer");
+  await router.handleMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      instanceName: "remote",
+      multiaddrs: ["/ip4/127.0.0.1/tcp/2/p2p/remote-peer"],
+      pubkey: "remote-pubkey",
+      userPublicAttributes: [
+        {
+          kind: "tag",
+          value: "Design",
+          label: "Design",
+          source: "USER.md",
+        },
+      ],
+      announcedAt: 10,
+    }),
+    timestamp: 1,
+  });
+
+  assert.ok(
+    logs.info.includes(
+      "[libp2p-mesh] Sent instance announce peer=remote-peer instance=local-instance addrs=0 attrs=1",
+    ),
+  );
+  assert.ok(
+    logs.info.includes(
+      "[libp2p-mesh] Received instance announce peer=remote-peer instance=remote-instance addrs=1 attrs=1 changed=true",
+    ),
+  );
+});
+
+test("announce logging payload mode records complete announce JSON", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    config: {
+      announceLogDetail: "payload",
+    },
+    logger,
+  });
+
+  await router.announceToPeer("remote-peer");
+  const sentPayload = JSON.parse(sent[0].message.payload);
+  await router.handleMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      instanceName: "remote",
+      multiaddrs: ["/ip4/127.0.0.1/tcp/2/p2p/remote-peer"],
+      pubkey: "remote-pubkey",
+      announcedAt: 10,
+    }),
+    timestamp: 1,
+  });
+
+  assert.ok(
+    logs.info.includes(
+      "[libp2p-mesh] Sent instance announce peer=remote-peer instance=local-instance addrs=0 attrs=0",
+    ),
+  );
+  assert.ok(
+    logs.debug.includes(
+      `[libp2p-mesh] Sent instance announce payload=${JSON.stringify(sentPayload)}`,
+    ),
+  );
+  assert.ok(
+    logs.debug.includes(
+      '[libp2p-mesh] Received instance announce payload={"instanceId":"remote-instance","peerId":"remote-peer","instanceName":"remote","multiaddrs":["/ip4/127.0.0.1/tcp/2/p2p/remote-peer"],"pubkey":"remote-pubkey","announcedAt":10}',
+    ),
+  );
+});
+
+test("announce logging off mode suppresses summary and payload logs", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    config: {
+      announceLogDetail: "off",
+    },
+    logger,
+  });
+
+  await router.announceToPeer("remote-peer");
+  await router.handleMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "remote-peer",
+    instanceId: "remote-instance",
+    payload: JSON.stringify({
+      instanceId: "remote-instance",
+      peerId: "remote-peer",
+      multiaddrs: [],
+      announcedAt: 10,
+    }),
+    timestamp: 1,
+  });
+
+  assert.deepEqual(logs.info, []);
+  assert.deepEqual(logs.debug, []);
+});
+
+test("announce logging treats unknown detail as summary", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    config: {
+      announceLogDetail: "verbose" as "summary",
+    },
+    logger,
+  });
+
+  await router.announceToPeer("remote-peer");
+
+  assert.deepEqual(logs.debug, []);
+  assert.ok(
+    logs.info.includes(
+      "[libp2p-mesh] Sent instance announce peer=remote-peer instance=local-instance addrs=0 attrs=0",
+    ),
+  );
+});
+
+test("announce logging payload serialization failure falls back to summary", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    config: {
+      announceLogDetail: "payload",
+    },
+    logger,
+  });
+
+  const originalStringify = JSON.stringify;
+  JSON.stringify = (() => {
+    throw new Error("stringify failed");
+  }) as typeof JSON.stringify;
+
+  try {
+    await router.handleMessage({
+      id: "announce-1",
+      type: "instance-announce",
+      from: "remote-peer",
+      instanceId: "remote-instance",
+      payload: originalStringify({
+        instanceId: "remote-instance",
+        peerId: "remote-peer",
+        multiaddrs: [],
+        announcedAt: 10,
+      }),
+      timestamp: 1,
+    });
+  } finally {
+    JSON.stringify = originalStringify;
+  }
+
+  assert.equal((await router.resolveInstance("remote-instance"))?.peerId, "remote-peer");
+  assert.ok(
+    logs.info.includes(
+      "[libp2p-mesh] Received instance announce peer=remote-peer instance=remote-instance addrs=0 attrs=0 changed=true",
+    ),
+  );
+  assert.deepEqual(logs.debug, []);
 });
 
 test("sendUserAttributeMessage dry run returns tag-matched targets without sending", async () => {
