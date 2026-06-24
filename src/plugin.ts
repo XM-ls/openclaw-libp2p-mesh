@@ -6,7 +6,7 @@ import { createInstancePeerStore } from "./instance-peer-store.js";
 import { createInstanceRouter } from "./instance-router.js";
 import { createMeshNetwork } from "./mesh.js";
 import { createPeerLabelStore } from "./peer-label-store.js";
-import { createUserMdAttributeSource } from "./user-md-attributes.js";
+import { createUserMdAgentAttributeSource } from "./user-md-agent-attributes.js";
 import { createUserProfileStore } from "./user-profile-store.js";
 import { buildP2PTools } from "./agent-tools.js";
 import { registerLibp2pMeshCli } from "./profile-cli.js";
@@ -26,8 +26,6 @@ export function registerLibp2pMeshWithDeps(
   api: OpenClawPluginApi,
   deps: Libp2pMeshPluginDeps = {},
 ) {
-  registerLibp2pMeshCli(api);
-
   const config = api.pluginConfig as MeshConfig | undefined;
   let unsubscribeInbound: (() => void) | undefined;
   let serviceStarted = false;
@@ -38,7 +36,7 @@ export function registerLibp2pMeshWithDeps(
   });
   const store = createInstancePeerStore({ logger: api.logger });
   const peerLabelStore = createPeerLabelStore({ logger: api.logger });
-  const userAttributeSource = createUserMdAttributeSource({ logger: api.logger });
+  const userAttributeSource = createUserMdAgentAttributeSource({ logger: api.logger });
   const userProfileStore = createUserProfileStore({ logger: api.logger });
   const delivery = createOpenClawRuntimeInboundDelivery({
     config: api.config,
@@ -63,6 +61,14 @@ export function registerLibp2pMeshWithDeps(
     userAttributeSource,
     userProfileStore,
     peerLabelStore,
+  });
+
+  registerLibp2pMeshCli(api, {
+    profile: {
+      async afterProfileSave() {
+        await router.refreshPublicAttributes();
+      },
+    },
   });
 
   const channel = createLibp2pMeshChannel(mesh);

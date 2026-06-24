@@ -265,6 +265,51 @@ test("profile command action loads USER.md tags and profile attrs, then writes o
   assert.match(printed.join("\n"), /Restart the gateway/);
 });
 
+test("profile command calls afterProfileSave after writing profile attributes", async () => {
+  const root = makeCommand("openclaw");
+  const writes: UserPublicAttribute[][] = [];
+  const events: string[] = [];
+  const { api } = makeApi(root);
+
+  registerLibp2pMeshCli(api, {
+    profile: {
+      createPrompter: () => makePrompter(["add-attribute", "group", "实验室", "preview-finish", true]),
+      createProfileStore: () => ({
+        async listAttributes() {
+          return [];
+        },
+        async replaceAttributes(attributes) {
+          writes.push(attributes);
+          events.push("replaceAttributes");
+        },
+      }),
+      createUserMdAttributeSource: () => ({
+        async loadTags() {
+          return [];
+        },
+      }),
+      async afterProfileSave() {
+        events.push("afterProfileSave");
+      },
+    },
+  });
+
+  const profile = root.children.find((child) => child.name === "libp2p-mesh")?.children.find((child) => child.name === "profile");
+  assert.ok(profile?.actionHandler);
+  await profile.actionHandler();
+
+  assert.deepEqual(writes[0], [
+    {
+      kind: "structured",
+      key: "group",
+      value: "实验室",
+      label: "group: 实验室",
+      source: "profile",
+    },
+  ]);
+  assert.deepEqual(events, ["replaceAttributes", "afterProfileSave"]);
+});
+
 test("registerLibp2pMesh exposes setup profile labels and debug CLI commands in one registration", () => {
   const root = makeCommand("openclaw");
   const { api, registrations } = makeApi(root);

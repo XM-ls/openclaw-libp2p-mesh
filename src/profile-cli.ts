@@ -30,6 +30,7 @@ export type ProfileCliDeps = {
   createPrompter?: (ctx: OpenClawPluginCliContext) => SetupPrompter;
   createProfileStore?: (api: OpenClawPluginApi) => Pick<UserProfileStore, "listAttributes" | "replaceAttributes">;
   createUserMdAttributeSource?: (api: OpenClawPluginApi) => { loadTags(): Promise<Awaited<ReturnType<UserProfileStore["listAttributes"]>>> };
+  afterProfileSave?: () => Promise<void>;
 };
 
 export type LabelsCliDeps = {
@@ -92,6 +93,7 @@ export function registerLibp2pMeshProfileCommand(
           writer: {
             async replaceAttributes(attributes) {
               await profileStore.replaceAttributes(attributes);
+              await deps.afterProfileSave?.();
             },
           },
         });
