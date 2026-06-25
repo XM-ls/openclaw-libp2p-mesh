@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import type { UserPublicAttribute } from "./types.js";
 import type {
@@ -8,7 +7,6 @@ import type {
 import { validateExtractedUserMdTags } from "./user-md-agent-attributes.js";
 
 const EXTRACTION_TIMEOUT_MS = 30000;
-const SESSION_HASH_LENGTH = 16;
 
 export const USER_MD_ATTRIBUTE_EXTRACTION_PROMPT = [
   "你是 libp2p-mesh 的 USER.md 公开属性提取器。",
@@ -29,9 +27,15 @@ type Logger = {
   warn?: (message: string) => void;
 };
 
-function hashForSessionKey(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, SESSION_HASH_LENGTH);
-}
+type RuntimeLlmComplete = {
+  complete(request: {
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    purpose: string;
+    maxTokens?: number;
+    temperature?: number;
+    timeoutMs?: number;
+  }): Promise<unknown>;
+};
 
 function buildUserMdExtractionMessage(markdown: string, sourcePath: string): string {
   return [
@@ -99,6 +103,48 @@ export function extractLatestAssistantText(messages: unknown[]): string | undefi
   return undefined;
 }
 
+export function extractCompletionText(result: unknown): string | undefined {
+  if (typeof result === "string") {
+    return result;
+  }
+  if (!isRecord(result)) {
+    return undefined;
+  }
+
+  const direct =
+    extractTextFromContent(result.content) ??
+    (typeof result.text === "string" ? result.text : undefined) ??
+    (typeof result.outputText === "string" ? result.outputText : undefined) ??
+    (typeof result.message === "string" ? result.message : undefined);
+  if (direct?.trim()) {
+    return direct;
+  }
+
+  const choices = result.choices;
+  if (!Array.isArray(choices)) {
+    return undefined;
+  }
+
+  for (const choice of choices) {
+    if (!isRecord(choice)) {
+      continue;
+    }
+    const message = choice.message;
+    if (isRecord(message)) {
+      const text = extractTextFromContent(message.content);
+      if (text?.trim()) {
+        return text;
+      }
+    }
+    const text = extractTextFromContent(choice.content);
+    if (text?.trim()) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
 function stripJsonFence(text: string): string {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -117,6 +163,18 @@ function unavailable(reason: string): UserMdAttributeExtractionUnavailable {
   return { unavailable: true, reason };
 }
 
+function runtimeLlm(api: OpenClawPluginApi): RuntimeLlmComplete | undefined {
+  const runtime = api.runtime as unknown;
+  if (!isRecord(runtime)) {
+    return undefined;
+  }
+  const llm = runtime.llm;
+  if (!isRecord(llm) || typeof llm.complete !== "function") {
+    return undefined;
+  }
+  return llm as RuntimeLlmComplete;
+}
+
 export function createOpenClawUserMdAttributeExtractor(
   api: OpenClawPluginApi,
   options?: {
@@ -129,31 +187,23 @@ export function createOpenClawUserMdAttributeExtractor(
 
   return {
     async extract({ markdown, sourcePath }) {
-      const subagent = api.runtime?.subagent;
-      if (!subagent?.run || !subagent.waitForRun || !subagent.getSessionMessages) {
-        return unavailable("OpenClaw subagent runtime is unavailable");
+      const llm = runtimeLlm(api);
+      if (!llm) {
+        return unavailable("OpenClaw runtime llm.complete is unavailable");
       }
 
-      const sessionKey = `libp2p-mesh:user-md-attributes:${hashForSessionKey(sourcePath)}`;
-
       try {
-        await subagent.deleteSession?.({ sessionKey, deleteTranscript: true }).catch(() => undefined);
-        const { runId } = await subagent.run({
-          sessionKey,
-          message: buildUserMdExtractionMessage(markdown, sourcePath),
-          extraSystemPrompt: USER_MD_ATTRIBUTE_EXTRACTION_PROMPT,
-          lane: "libp2p-mesh-user-md-attributes",
-          lightContext: true,
-          deliver: false,
+        const result = await llm.complete({
+          messages: [
+            { role: "system", content: USER_MD_ATTRIBUTE_EXTRACTION_PROMPT },
+            { role: "user", content: buildUserMdExtractionMessage(markdown, sourcePath) },
+          ],
+          purpose: "libp2p-mesh.user-md-attributes",
+          maxTokens: 512,
+          temperature: 0.1,
+          timeoutMs,
         });
-
-        const waitResult = await subagent.waitForRun({ runId, timeoutMs });
-        if (waitResult.status !== "ok") {
-          return unavailable(waitResult.error ?? `OpenClaw subagent extraction ${waitResult.status}`);
-        }
-
-        const { messages } = await subagent.getSessionMessages({ sessionKey, limit: 10 });
-        const text = extractLatestAssistantText(messages);
+        const text = extractCompletionText(result);
         if (!text) {
           return [];
         }
@@ -163,8 +213,6 @@ export function createOpenClawUserMdAttributeExtractor(
         const reason = error instanceof Error ? error.message : String(error);
         logger?.warn?.(`[libp2p-mesh] USER.md agent extraction failed: ${reason}`);
         return unavailable(reason);
-      } finally {
-        await subagent.deleteSession?.({ sessionKey, deleteTranscript: true }).catch(() => undefined);
       }
     },
   };

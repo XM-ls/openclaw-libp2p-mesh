@@ -58,7 +58,8 @@ export function handleP2PInbound(msg: P2PMessage, deps: InboundHandlerDeps): voi
     return;
   }
 
-  const text = `[来自 ${msg.from}]\n${msg.payload}`;
+  const sender = msg.instanceId ?? msg.from;
+  const text = `[来自 ${sender}]\n${msg.payload}`;
   sendToChannel("libp2p-mesh", msg.from, text).catch((err) => {
     logger?.error?.(`[libp2p-mesh] Failed to forward direct message from ${msg.from}: ${err}`);
   });

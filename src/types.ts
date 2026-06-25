@@ -248,6 +248,7 @@ export type InstanceRouterOptions = {
     load?(): Promise<PeerLabelsFile>;
     listLabels(instanceId: string): Promise<LocalPeerLabelAttribute[]>;
   };
+  publicAttributeRefreshInitiallyEnabled?: boolean;
 };
 
 export interface InstanceRouter {
@@ -257,6 +258,7 @@ export interface InstanceRouter {
   stop(): Promise<void>;
   handleMessage(msg: P2PMessage): Promise<void>;
   announceToPeer(peerId: string): Promise<void>;
+  enablePublicAttributeRefresh(): void;
   refreshPublicAttributes(): Promise<void>;
   listInstances(): Promise<InstancePeerRecord[]>;
   resolveInstance(instanceId: string): Promise<InstancePeerRecord | undefined>;
@@ -284,6 +286,7 @@ export interface MeshConfig {
   bootstrapList?: string[];
   meshTopic?: string;
   announceLogDetail?: AnnounceLogDetail;
+  publicAttributeRefreshStartupDelayMs?: number;
   enableAgentSync?: boolean;
   enableWebSocket?: boolean;
   peerIdPath?: string;

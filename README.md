@@ -75,6 +75,161 @@ The generated config shape is:
 }
 ```
 
+## 安装后配置流程
+
+推荐用户安装插件后按下面顺序配置。所有配置都通过 CLI 完成，不需要手动打开 `openclaw.json`。
+
+### 1. 安装或更新插件
+
+```bash
+openclaw plugins update libp2p-mesh@latest
+```
+
+如果是首次安装，也可以使用：
+
+```bash
+openclaw install libp2p-mesh
+```
+
+### 2. 运行网络和入站目标配置向导
+
+```bash
+openclaw libp2p-mesh setup
+```
+
+这个向导会写入：
+
+```text
+plugins.entries["libp2p-mesh"].config
+```
+
+不会写入 `channels["libp2p-mesh"]`。常见选择：
+
+- 同一局域网测试：选择 LAN / mDNS。
+- 跨网络或需要 relay：选择 bootstrap / relay 相关模式。
+- 需要把收到的 P2P 消息投递到飞书、QQ、Telegram 等 channel：配置 `inboundTargets`。
+- 暂时只需要工具能力、不接收消息：选择禁用入站投递，写入 `inboundTargets: []`。
+
+入站目标示例：
+
+```json
+{
+  "id": "feishu-main",
+  "channel": "feishu",
+  "target": "user:ou_xxx"
+}
+```
+
+QQ 单聊示例：
+
+```json
+{
+  "id": "qqbot-main",
+  "channel": "qqbot",
+  "target": "user:<senderId>"
+}
+```
+
+其中 `<senderId>` 可以从 QQ channel 日志里的 `senderId` 取得。
+
+### 3. 一键安装固定 Agent 提示词
+
+```bash
+openclaw libp2p-mesh prompt install
+```
+
+该命令会把内置的 P2P 中继助手规则写入：
+
+```text
+~/.openclaw/workspace/AGENTS.md
+```
+
+它不会覆盖整个文件，只维护下面两个 marker 之间的区块：
+
+```md
+<!-- libp2p-mesh:prompt:start -->
+# P2P 中继助手规则
+...
+<!-- libp2p-mesh:prompt:end -->
+```
+
+如果区块已经存在，命令会询问是否更新到插件内置的最新版。
+
+### 4. 可选：配置用户公开属性
+
+```bash
+openclaw libp2p-mesh profile
+```
+
+`USER.md` 中的公开 tag 由 gateway 使用 OpenClaw 已配置的 agent/API 模型异步提取，不会写回 `USER.md`。初始 announce 或日志可能先不携带属性；等待后续完整 `instance-announce` 快照发出后，再按属性发送或排查匹配结果。用户手动新增的结构化属性会保存到：
+
+```text
+~/.openclaw/libp2p/user-profile.json
+```
+
+例如：
+
+```json
+{
+  "kind": "structured",
+  "key": "group",
+  "value": "实验室",
+  "label": "实验室",
+  "source": "profile"
+}
+```
+
+之后按属性发送时使用 selector：
+
+```text
+group=实验室
+tag:P2P
+#P2P
+```
+
+`selector` 是发送工具调用时的临时匹配条件，不需要写入配置文件。
+
+### 5. 可选：配置 announce 日志级别
+
+```bash
+openclaw libp2p-mesh debug
+```
+
+推荐保持默认 `summary`。如果排查发现、属性或地址广播问题，可以临时切到 `payload` 查看完整 announce JSON；排查结束后再切回 `summary` 或 `off`。
+
+### 6. 可选：配置远端实例本地标签
+
+```bash
+openclaw libp2p-mesh labels
+```
+
+Labels are private local notes for remote instances you have already discovered. Use them when you want your own grouping to drive sends without asking the remote user to publish that attribute.
+
+### 7. 重启或启动 gateway
+
+完成 `setup` 或 `prompt install` 后，重启 gateway 让配置和提示词生效：
+
+```bash
+openclaw gateway restart
+```
+
+或者停止后重新运行：
+
+```bash
+openclaw gateway
+```
+
+`profile` 保存后，如果 gateway 正在运行，会自动刷新并重新广播公开属性；只有 gateway 没有运行时，才需要启动或重启后生效。
+
+启动后可以观察日志：
+
+```text
+[libp2p-mesh] Sent instance announce ... attrs=2
+[libp2p-mesh] Received instance announce ... changed=true
+```
+
+其中 `attrs` 是本次 announce 中携带的用户公开属性数量。
+
 ## Configuration
 
 Use the interactive setup command for first-time configuration and later edits:

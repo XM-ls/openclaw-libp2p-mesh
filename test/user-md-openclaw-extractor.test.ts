@@ -3,35 +3,26 @@ import assert from "node:assert/strict";
 
 import {
   createOpenClawUserMdAttributeExtractor,
+  extractCompletionText,
   extractLatestAssistantText,
   parseUserMdAttributeResponse,
   USER_MD_ATTRIBUTE_EXTRACTION_PROMPT,
 } from "../src/user-md-openclaw-extractor.js";
 
-function makeApi(messages: unknown[], waitStatus: "ok" | "error" | "timeout" = "ok") {
+function makeApi(result: unknown) {
   const calls: Array<{ name: string; params: unknown }> = [];
   const api = {
     logger: {
       warn() {},
     },
     runtime: {
-      subagent: {
-        async run(params: unknown) {
-          calls.push({ name: "run", params });
-          return { runId: "run-1" };
-        },
-        async waitForRun(params: unknown) {
-          calls.push({ name: "waitForRun", params });
-          return waitStatus === "ok"
-            ? { status: "ok" as const }
-            : { status: waitStatus, error: "model unavailable" };
-        },
-        async getSessionMessages(params: unknown) {
-          calls.push({ name: "getSessionMessages", params });
-          return { messages };
-        },
-        async deleteSession(params: unknown) {
-          calls.push({ name: "deleteSession", params });
+      llm: {
+        async complete(params: unknown) {
+          calls.push({ name: "complete", params });
+          if (result instanceof Error) {
+            throw result;
+          }
+          return result;
         },
       },
     },
@@ -58,6 +49,16 @@ test("parseUserMdAttributeResponse accepts fenced JSON arrays", () => {
   );
 });
 
+test("extractCompletionText reads text from common completion result shapes", () => {
+  assert.equal(extractCompletionText("plain"), "plain");
+  assert.equal(extractCompletionText({ content: [{ type: "text", text: "content" }] }), "content");
+  assert.equal(extractCompletionText({ outputText: "output" }), "output");
+  assert.equal(
+    extractCompletionText({ choices: [{ message: { content: "choice" } }] }),
+    "choice",
+  );
+});
+
 test("extractLatestAssistantText reads the latest assistant text from common message shapes", () => {
   assert.equal(
     extractLatestAssistantText([
@@ -69,51 +70,45 @@ test("extractLatestAssistantText reads the latest assistant text from common mes
   );
 });
 
-test("createOpenClawUserMdAttributeExtractor runs subagent and parses assistant JSON", async () => {
-  const { api, calls } = makeApi([
-    {
-      role: "assistant",
-      content: "[{\"kind\":\"tag\",\"value\":\"P2P\",\"label\":\"P2P\",\"source\":\"USER.md\"}]",
-    },
-  ]);
+test("createOpenClawUserMdAttributeExtractor runs llm completion and parses JSON", async () => {
+  const { api, calls } = makeApi({
+    content: "[{\"kind\":\"tag\",\"value\":\"P2P\",\"label\":\"P2P\",\"source\":\"USER.md\"}]",
+  });
   const extractor = createOpenClawUserMdAttributeExtractor(api, { timeoutMs: 1234 });
 
   assert.deepEqual(await extractor.extract({ markdown: "Notes: P2P", sourcePath: "/tmp/USER.md" }), [
     { kind: "tag", value: "P2P", label: "P2P", source: "USER.md" },
   ]);
 
-  const runCall = calls.find((call) => call.name === "run");
-  assert.ok(runCall);
-  assert.match(JSON.stringify(runCall.params), /libp2p-mesh-user-md-attributes/);
-  assert.match(JSON.stringify(runCall.params), /Notes: P2P/);
-  assert.match(JSON.stringify(runCall.params), /只输出 JSON 数组/);
-  assert.match(JSON.stringify(runCall.params), /USER.md/);
+  const completeCall = calls.find((call) => call.name === "complete");
+  assert.ok(completeCall);
+  assert.match(JSON.stringify(completeCall.params), /libp2p-mesh\.user-md-attributes/);
+  assert.match(JSON.stringify(completeCall.params), /Notes: P2P/);
+  assert.match(JSON.stringify(completeCall.params), /只输出 JSON 数组/);
+  assert.match(JSON.stringify(completeCall.params), /USER.md/);
+  assert.match(JSON.stringify(completeCall.params), /1234/);
   assert.match(USER_MD_ATTRIBUTE_EXTRACTION_PROMPT, /不要提取“刚认识”/);
-
-  const waitCall = calls.find((call) => call.name === "waitForRun");
-  assert.ok(waitCall);
-  assert.match(JSON.stringify(waitCall.params), /1234/);
-  assert.equal(calls.filter((call) => call.name === "deleteSession").length, 2);
+  assert.equal(JSON.stringify(completeCall.params).includes("sessionKey"), false);
 });
 
-test("createOpenClawUserMdAttributeExtractor returns empty tags for invalid assistant output", async () => {
-  const { api } = makeApi([{ role: "assistant", content: "not json" }]);
+test("createOpenClawUserMdAttributeExtractor returns empty tags for invalid completion output", async () => {
+  const { api } = makeApi({ content: "not json" });
   const extractor = createOpenClawUserMdAttributeExtractor(api);
 
   assert.deepEqual(await extractor.extract({ markdown: "Notes: P2P", sourcePath: "/tmp/USER.md" }), []);
 });
 
-test("createOpenClawUserMdAttributeExtractor reports unavailable when subagent runtime is missing", async () => {
+test("createOpenClawUserMdAttributeExtractor reports unavailable when llm runtime is missing", async () => {
   const extractor = createOpenClawUserMdAttributeExtractor({ runtime: {}, logger: {} } as never);
 
   assert.deepEqual(
     await extractor.extract({ markdown: "Notes: P2P", sourcePath: "/tmp/USER.md" }),
-    { unavailable: true, reason: "OpenClaw subagent runtime is unavailable" },
+    { unavailable: true, reason: "OpenClaw runtime llm.complete is unavailable" },
   );
 });
 
-test("createOpenClawUserMdAttributeExtractor reports unavailable when subagent wait fails", async () => {
-  const { api } = makeApi([], "timeout");
+test("createOpenClawUserMdAttributeExtractor reports unavailable when llm completion fails", async () => {
+  const { api } = makeApi(new Error("model unavailable"));
   const extractor = createOpenClawUserMdAttributeExtractor(api);
 
   assert.deepEqual(
