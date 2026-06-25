@@ -160,6 +160,19 @@ test("syncLocalLabels refreshes existing records and does not create unknown rec
   });
 });
 
+test("updateLocalLabels does not create unknown records", async () => {
+  await withTempDir(async (dir) => {
+    const store = createInstancePeerStore({
+      path: path.join(dir, "libp2p", "instance-peer.json"),
+    });
+
+    const result = await store.updateLocalLabels("unknown-instance", [localLabel()]);
+
+    assert.equal(result, undefined);
+    assert.equal(await store.resolve("unknown-instance"), undefined);
+  });
+});
+
 test("updateLocalLabels removes snapshot when labels are empty", async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, "libp2p", "instance-peer.json");
