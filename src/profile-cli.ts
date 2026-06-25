@@ -37,6 +37,7 @@ export type LabelsCliDeps = {
   createPrompter?: (ctx: OpenClawPluginCliContext) => SetupPrompter;
   createPeerStore?: (api: OpenClawPluginApi) => Pick<InstancePeerStore, "list">;
   createPeerLabelStore?: (api: OpenClawPluginApi) => Pick<PeerLabelStore, "listRawLabels" | "replaceLabels">;
+  afterLabelsSave?: (instanceId: string) => Promise<void>;
 };
 
 export type Libp2pMeshCliDeps = {
@@ -128,6 +129,7 @@ export function registerLibp2pMeshLabelsCommand(
           writer: {
             async replaceLabels(instanceId, labels) {
               await peerLabelStore.replaceLabels(instanceId, labels);
+              await deps.afterLabelsSave?.(instanceId);
             },
           },
         });

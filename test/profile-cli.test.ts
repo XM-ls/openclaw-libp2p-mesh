@@ -155,6 +155,7 @@ test("labels command action loads discovered instances and replaces local labels
   const root = makeCommand("openclaw");
   const printed: string[] = [];
   const writes: Array<{ instanceId: string; labels: LocalPeerLabel[] }> = [];
+  const events: string[] = [];
   const { api } = makeApi(root);
   const instances: InstancePeerRecord[] = [
     {
@@ -190,8 +191,12 @@ test("labels command action loads discovered instances and replaces local labels
         },
         async replaceLabels(instanceId, labels) {
           writes.push({ instanceId, labels });
+          events.push(`replaceLabels:${instanceId}`);
         },
       }),
+      async afterLabelsSave(instanceId) {
+        events.push(`afterLabelsSave:${instanceId}`);
+      },
     },
   });
 
@@ -200,6 +205,7 @@ test("labels command action loads discovered instances and replaces local labels
   await labels.actionHandler();
 
   assert.deepEqual(writes, [{ instanceId: "alice@abc.111", labels: [{ key: "group", value: "实验室" }] }]);
+  assert.deepEqual(events, ["replaceLabels:alice@abc.111", "afterLabelsSave:alice@abc.111"]);
   assert.match(printed.join("\n"), /Local labels saved/);
   assert.equal(closeCount, 1);
 });

@@ -73,6 +73,11 @@ export function registerLibp2pMeshWithDeps(
         await router.refreshPublicAttributes();
       },
     },
+    labels: {
+      async afterLabelsSave(instanceId) {
+        await store.updateLocalLabels(instanceId, await peerLabelStore.listLabels(instanceId));
+      },
+    },
   });
 
   const channel = createLibp2pMeshChannel(mesh);
