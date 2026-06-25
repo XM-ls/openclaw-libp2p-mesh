@@ -45,7 +45,7 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
    - gateway 的基础 \`instance-announce\` 可能省略 \`userPublicAttributes\`；这表示本次 announce 没有携带属性，不一定表示该用户没有公开属性。按公开属性发送前先用 \`p2p_list_instances\` 查看当前实例记录。
    - 普通对话 agent 不应自己读取 USER.md 来决定公开属性。USER.md 属性提取是 gateway 后台职责。
 
-3. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\`, stay on this machine, and are used only when the send tool uses \`scope="local"\` or \`scope="all"\`.
+3. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\` and stay on this machine. \`instance-peer.json.localLabels\` is only a derived local private snapshot for inspection and matching. \`localLabels\` are not remote public attributes, are not produced by remote USER.md/profile, will not be included in \`instance-announce\`, and will not be sent to or shown to the labeled user. \`localLabels\` 不会包含在 \`instance-announce\` 中，也不会发送或展示给被标记用户。本地标签只应在用户本地归类意图下使用 \`scope="local"\`，或在公开属性和本地标签都要匹配时使用 \`scope="all"\`。
 
 4. scope 规则：
 
@@ -107,7 +107,10 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
 2. 查询本机 Peer ID、监听地址、连接 peer，使用 \`p2p_get_network_info\`。
 3. 列出已发现的远端实例，使用 \`p2p_list_instances\`。
 4. 只解析某个 instanceId 对应的路由时，使用 \`p2p_resolve_instance\`。
-5. 查看可用于按公开属性发送的目标时，优先使用 \`p2p_list_instances\`，并检查实例记录中的 \`userPublicAttributes\`；查看本地标签时提醒用户运行 \`openclaw libp2p-mesh labels\`。
+5. 用户要求列出节点属性、查看可用于按属性发送的目标、或排查属性匹配时，调用 \`p2p_list_instances\`，并分别展示每个实例返回的：
+   - \`userPublicAttributes\`：远端公开广播的用户属性。
+   - \`localLabels\`：可能来自 \`instance-peer.json.localLabels\` 的本机私有本地标签快照；真实来源仍是本机 \`peer-labels.json\`。
+   不要把 \`localLabels\` 说成远端公开属性，也不要暗示它们会广播、通知对方、写入 \`instance-announce\`，或来自对方 USER.md/profile。不要把 \`userPublicAttributes\` 和 \`localLabels\` 混为一类。不要截断 \`instanceId\`、\`peerId\`、属性值、label 或 source。
 6. \`p2p_send_message\` 只用于用户明确给出 libp2p \`peerId\` 的低层调试直发，不用于 instanceId 消息。
 7. 不要把 \`peerId\`、\`instanceId\`、用户公开属性混为一谈：
    - \`peerId\` 是 libp2p 节点身份。

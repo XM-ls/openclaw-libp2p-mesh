@@ -26,6 +26,13 @@ test("agent prompt maps user wording to scope choices", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
 });
 
+test("libp2p prompt explains localLabels snapshot privacy", () => {
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /instance-peer\.json/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*私有.*快照/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*不会.*instance-announce/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /本地标签.*scope="local"/s);
+});
+
 test("agent prompt documents async USER.md public attributes", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /source="USER\.md"/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /异步/);
