@@ -154,6 +154,7 @@ export interface InstancePeerRecord {
   multiaddrs: string[];
   pubkey?: string;
   userPublicAttributes?: UserPublicAttribute[];
+  localLabels?: LocalPeerLabelAttribute[];
   lastSeenAt: number;
   lastAnnouncedAt: number;
   source: "announce";
@@ -169,6 +170,8 @@ export interface InstancePeerStore {
   load(): Promise<InstancePeerTable>;
   list(): Promise<InstancePeerRecord[]>;
   resolve(instanceId: string): Promise<InstancePeerRecord | undefined>;
+  syncLocalLabels(labelsByInstance: Record<string, LocalPeerLabelAttribute[]>): Promise<InstancePeerTable>;
+  updateLocalLabels(instanceId: string, labels: LocalPeerLabelAttribute[]): Promise<InstancePeerRecord | undefined>;
   upsertFromAnnounce(payload: InstanceAnnouncePayload): Promise<{
     record: InstancePeerRecord;
     changed: boolean;
