@@ -556,6 +556,67 @@ test("startup local label batch preserves labels for records announced during de
   assert.deepEqual((await store.resolve("remote-race"))?.localLabels, [localProject]);
 });
 
+test("fallback startup local label batch preserves labels for records announced during delayed listLabels", async () => {
+  const sent: SentMessage[] = [];
+  const localProject: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "小龙虾",
+    label: "小龙虾",
+    source: "local",
+  };
+  const store = makeStore([makeRecord("remote-existing", "peer-existing")]);
+  const mesh = makeMesh(sent);
+  let signalListStarted: (() => void) | undefined;
+  let releaseList: (() => void) | undefined;
+  const listStarted = new Promise<void>((resolve) => {
+    signalListStarted = resolve;
+  });
+  const router = createInstanceRouter({
+    mesh,
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: {
+      async listLabels(instanceId: string) {
+        if (instanceId === "remote-existing") {
+          signalListStarted?.();
+          await new Promise<void>((release) => {
+            releaseList = release;
+          });
+        }
+        return instanceId === "remote-race" ? [localProject] : [];
+      },
+    },
+  });
+
+  const startPromise = router.start();
+  await listStarted;
+
+  mesh.emitMessage({
+    id: "announce-race",
+    type: "instance-announce",
+    from: "peer-race",
+    instanceId: "remote-race",
+    payload: JSON.stringify({
+      instanceId: "remote-race",
+      peerId: "peer-race",
+      instanceName: "Remote Race",
+      multiaddrs: [],
+      announcedAt: 123,
+    }),
+    timestamp: 123,
+  });
+
+  await flushMicrotasks();
+  assert.deepEqual((await store.resolve("remote-race"))?.localLabels, [localProject]);
+
+  assert.ok(releaseList, "expected startup peer label list to be pending");
+  releaseList();
+  await startPromise;
+
+  assert.deepEqual((await store.resolve("remote-race"))?.localLabels, [localProject]);
+});
+
 test("startup local label sync failure warns and still announces connected peers", async () => {
   const sent: SentMessage[] = [];
   const { logs, logger } = makeLogger();

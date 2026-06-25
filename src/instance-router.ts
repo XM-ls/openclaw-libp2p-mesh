@@ -261,6 +261,14 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
     }
 
+    const currentTable = await store.load();
+    for (const instanceId of Object.keys(currentTable.instances)) {
+      if (instanceId in result) {
+        continue;
+      }
+      result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
+    }
+
     return result;
   }
 
