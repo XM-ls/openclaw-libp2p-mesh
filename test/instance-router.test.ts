@@ -487,6 +487,75 @@ test("start syncs local label snapshots from one loaded peer label file", async 
   assert.equal(await store.resolve("remote-c"), undefined);
 });
 
+test("startup local label batch preserves labels for records announced during delayed load", async () => {
+  const sent: SentMessage[] = [];
+  const localProject: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "小龙虾",
+    label: "小龙虾",
+    source: "local",
+  };
+  const file: PeerLabelsFile = {
+    version: 1,
+    updatedAt: 1,
+    peers: {
+      "remote-race": { labels: [{ key: "project", value: "小龙虾" }] },
+    },
+  };
+  const store = makeStore([]);
+  const mesh = makeMesh(sent);
+  let signalLoadStarted: (() => void) | undefined;
+  let releaseLoad: (() => void) | undefined;
+  const loadStarted = new Promise<void>((resolve) => {
+    signalLoadStarted = resolve;
+  });
+  const router = createInstanceRouter({
+    mesh,
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: {
+      async load() {
+        signalLoadStarted?.();
+        await new Promise<void>((release) => {
+          releaseLoad = release;
+        });
+        return file;
+      },
+      async listLabels(instanceId: string) {
+        return instanceId === "remote-race" ? [localProject] : [];
+      },
+    },
+  });
+
+  const startPromise = router.start();
+  await loadStarted;
+
+  mesh.emitMessage({
+    id: "announce-race",
+    type: "instance-announce",
+    from: "peer-race",
+    instanceId: "remote-race",
+    payload: JSON.stringify({
+      instanceId: "remote-race",
+      peerId: "peer-race",
+      instanceName: "Remote Race",
+      multiaddrs: [],
+      announcedAt: 123,
+    }),
+    timestamp: 123,
+  });
+
+  await flushMicrotasks();
+  assert.deepEqual((await store.resolve("remote-race"))?.localLabels, [localProject]);
+
+  assert.ok(releaseLoad, "expected startup peer label load to be pending");
+  releaseLoad();
+  await startPromise;
+
+  assert.deepEqual((await store.resolve("remote-race"))?.localLabels, [localProject]);
+});
+
 test("startup local label sync failure warns and still announces connected peers", async () => {
   const sent: SentMessage[] = [];
   const { logs, logger } = makeLogger();

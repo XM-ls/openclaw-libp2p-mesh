@@ -246,7 +246,10 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
     if (options.peerLabelStore?.load) {
       const labelsFile = await options.peerLabelStore.load();
-      for (const instanceId of instanceIds) {
+      for (const instanceId of new Set([
+        ...instanceIds,
+        ...Object.keys(labelsFile.peers),
+      ])) {
         result[instanceId] = rawPeerLabelsToLocalAttributes(
           labelsFile.peers[instanceId]?.labels,
         );
