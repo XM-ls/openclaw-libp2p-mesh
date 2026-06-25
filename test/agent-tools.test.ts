@@ -117,10 +117,14 @@ function listInstancesTool(options: {
   router: InstanceRouter;
   connectedPeers?: string[];
   localLabels?: Record<string, LocalPeerLabelAttribute[]>;
+  listLabels?: (instanceId: string) => LocalPeerLabelAttribute[] | Promise<LocalPeerLabelAttribute[]>;
 }) {
   const tool = buildP2PTools(makeMesh(options.connectedPeers), options.router, {
     peerLabelStore: {
       async listLabels(instanceId: string) {
+        if (options.listLabels) {
+          return await options.listLabels(instanceId);
+        }
         return options.localLabels?.[instanceId] ?? [];
       },
     },
@@ -256,13 +260,6 @@ test("list instances tool prefers record local label snapshots over store labels
     label: "group: record",
     source: "record",
   };
-  const storeLabel: LocalPeerLabelAttribute = {
-    kind: "structured",
-    key: "group",
-    value: "store",
-    label: "group: store",
-    source: "store",
-  };
   const instanceId = "alpha@MCowBQYDK2Vw.11111111";
   const router = makeRouter({
     listInstances: [
@@ -282,8 +279,8 @@ test("list instances tool prefers record local label snapshots over store labels
 
   const response = await listInstancesTool({
     router,
-    localLabels: {
-      [instanceId]: [storeLabel],
+    listLabels() {
+      throw new Error("store fallback should not be called when record labels are present");
     },
   }).execute("call-1", {});
   const text = response.content.map((item) => item.text).join("\n");
@@ -294,7 +291,7 @@ test("list instances tool prefers record local label snapshots over store labels
   assert.deepEqual(response.details.instances[0].localLabels, [recordLabel]);
 });
 
-test("list instances tool falls back to store labels when record has no local labels", async () => {
+test("list instances tool falls back to store labels when record omits local labels", async () => {
   const storeLabel: LocalPeerLabelAttribute = {
     kind: "structured",
     key: "group",
@@ -311,6 +308,39 @@ test("list instances tool falls back to store labels when record has no local la
         instanceName: "beta",
         multiaddrs: [],
         userPublicAttributes: [],
+        lastSeenAt: 1782287927147,
+        lastAnnouncedAt: 1782287927066,
+        source: "announce",
+      },
+    ],
+  });
+
+  const lookups: string[] = [];
+  const response = await listInstancesTool({
+    router,
+    listLabels(id) {
+      lookups.push(id);
+      return [storeLabel];
+    },
+  }).execute("call-1", {});
+  const text = response.content.map((item) => item.text).join("\n");
+
+  assert.match(text, /localLabels \(local private labels; not broadcast\):/);
+  assert.match(text, /value: store/);
+  assert.deepEqual(response.details.instances[0].localLabels, [storeLabel]);
+  assert.deepEqual(lookups, [instanceId]);
+});
+
+test("list instances tool respects empty local label snapshots without store fallback", async () => {
+  const instanceId = "gamma@MCowBQYDK2Vw.33333333";
+  const router = makeRouter({
+    listInstances: [
+      {
+        instanceId,
+        peerId: "peer-gamma",
+        instanceName: "gamma",
+        multiaddrs: [],
+        userPublicAttributes: [],
         localLabels: [],
         lastSeenAt: 1782287927147,
         lastAnnouncedAt: 1782287927066,
@@ -319,17 +349,19 @@ test("list instances tool falls back to store labels when record has no local la
     ],
   });
 
+  let lookupCount = 0;
   const response = await listInstancesTool({
     router,
-    localLabels: {
-      [instanceId]: [storeLabel],
+    listLabels() {
+      lookupCount += 1;
+      throw new Error("store fallback should not be called for empty record labels");
     },
   }).execute("call-1", {});
   const text = response.content.map((item) => item.text).join("\n");
 
-  assert.match(text, /localLabels \(local private labels; not broadcast\):/);
-  assert.match(text, /value: store/);
-  assert.deepEqual(response.details.instances[0].localLabels, [storeLabel]);
+  assert.match(text, /localLabels: none \(local private labels; not broadcast\)/);
+  assert.deepEqual(response.details.instances[0].localLabels, []);
+  assert.equal(lookupCount, 0);
 });
 
 test("send instance tool shows every target result when at least one target succeeds", async () => {

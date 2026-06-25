@@ -447,7 +447,7 @@ export function buildP2PTools(
           const rows = await Promise.all(
             instances.map(async (entry): Promise<ListInstanceRow> => {
               const localLabels =
-                entry.localLabels && entry.localLabels.length > 0
+                entry.localLabels !== undefined
                   ? entry.localLabels
                   : options.peerLabelStore
                     ? await options.peerLabelStore.listLabels(entry.instanceId)
