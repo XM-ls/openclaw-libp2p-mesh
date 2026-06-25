@@ -10,6 +10,7 @@ import type {
   LocalPeerLabelAttribute,
   MeshNetwork,
   P2PMessage,
+  PeerLabelsFile,
   UserPublicAttribute,
 } from "../src/types.js";
 
@@ -430,6 +431,96 @@ test("start syncs local label snapshots for existing records", async () => {
   assert.deepEqual((await store.resolve("remote-a"))?.localLabels, [localGroup]);
 });
 
+test("start syncs local label snapshots from one loaded peer label file", async () => {
+  const sent: SentMessage[] = [];
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const localProject: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "小龙虾",
+    label: "小龙虾",
+    source: "local",
+  };
+  const store = makeStore([
+    makeRecord("remote-a", "peer-a"),
+    makeRecord("remote-b", "peer-b"),
+  ]);
+  let loadCalls = 0;
+  const listCalls: string[] = [];
+  const file: PeerLabelsFile = {
+    version: 1,
+    updatedAt: 1,
+    peers: {
+      "remote-a": { labels: [{ key: "group", value: "实验室" }] },
+      "remote-b": { labels: [{ key: "project", value: "小龙虾" }] },
+      "remote-c": { labels: [{ key: "group", value: "ignored" }] },
+    },
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: {
+      async load() {
+        loadCalls += 1;
+        return file;
+      },
+      async listLabels(instanceId: string) {
+        listCalls.push(instanceId);
+        return [];
+      },
+    },
+  });
+
+  await router.start();
+
+  assert.equal(loadCalls, 1);
+  assert.deepEqual(listCalls, []);
+  assert.deepEqual((await store.resolve("remote-a"))?.localLabels, [localGroup]);
+  assert.deepEqual((await store.resolve("remote-b"))?.localLabels, [localProject]);
+  assert.equal(await store.resolve("remote-c"), undefined);
+});
+
+test("startup local label sync failure warns and still announces connected peers", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent, { connectedPeers: ["peer-a"] }),
+    store: makeStore([makeRecord("remote-a", "peer-a")]),
+    delivery: makeDelivery(),
+    logger,
+    peerLabelStore: {
+      async listLabels() {
+        throw new Error("labels unavailable");
+      },
+    },
+  });
+
+  await router.start();
+  await flushMicrotasks();
+
+  assert.equal(
+    logs.warn.some((message) =>
+      message.includes("Failed to sync local labels on startup") &&
+      message.includes("labels unavailable"),
+    ),
+    true,
+  );
+  assert.deepEqual(
+    sent.map((item) => [item.peerId, item.message.type]),
+    [
+      ["peer-a", "instance-announce"],
+      ["peer-a", "instance-announce"],
+    ],
+  );
+});
+
 test("handle announce refreshes local label snapshot for announced record", async () => {
   const sent: SentMessage[] = [];
   const localProject: LocalPeerLabelAttribute = {
@@ -467,6 +558,50 @@ test("handle announce refreshes local label snapshot for announced record", asyn
 
   await flushMicrotasks();
   assert.deepEqual((await store.resolve("remote-a"))?.localLabels, [localProject]);
+});
+
+test("announce local label sync failure warns and still responds to announce", async () => {
+  const sent: SentMessage[] = [];
+  const { logs, logger } = makeLogger();
+  const mesh = makeMesh(sent);
+  const router = createInstanceRouter({
+    mesh,
+    store: makeStore([]),
+    delivery: makeDelivery(),
+    logger,
+    peerLabelStore: {
+      async listLabels() {
+        throw new Error("labels unavailable");
+      },
+    },
+  });
+  router.attachHandlers();
+
+  mesh.emitMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "peer-a",
+    instanceId: "remote-a",
+    payload: JSON.stringify({
+      instanceId: "remote-a",
+      peerId: "peer-a",
+      instanceName: "Remote A",
+      multiaddrs: [],
+      announcedAt: 123,
+    }),
+    timestamp: 123,
+  });
+
+  await flushMicrotasks();
+  assert.equal((await router.resolveInstance("remote-a"))?.peerId, "peer-a");
+  assert.equal(
+    logs.warn.some((message) =>
+      message.includes("Failed to sync local labels for remote-a") &&
+      message.includes("labels unavailable"),
+    ),
+    true,
+  );
+  assert.equal(sent.some((item) => item.peerId === "peer-a"), true);
 });
 
 test("sendInstanceMessage returns ACK target results to tool layer", async () => {
@@ -1411,6 +1546,65 @@ test("local-scope user attribute matching uses record localLabels before peer la
 
   assert.equal(result.matched, 1);
   assert.equal(result.targets?.[0]?.matchSource, "local");
+  assert.deepEqual(labels.calls, []);
+});
+
+test("all-scope user attribute matching uses record localLabels before peer label fallback", async () => {
+  const publicProject: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "libp2p-mesh",
+    label: "libp2p-mesh",
+    source: "profile",
+  };
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const store = makeStore([
+    {
+      ...makeRecord("remote-a", "peer-a", {
+        userPublicAttributes: [publicProject],
+      }),
+      localLabels: [localGroup],
+    },
+  ]);
+  const labels = makePeerLabelStore({
+    "remote-a": [
+      {
+        kind: "structured",
+        key: "group",
+        value: "fallback",
+        label: "fallback",
+        source: "local",
+      },
+    ],
+  });
+  const router = createInstanceRouter({
+    mesh: makeMesh([]),
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: labels.store,
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "我这边准备好了",
+    { dryRun: true, scope: "all" },
+  );
+
+  assert.equal(result.matched, 1);
+  assert.deepEqual(result.targets, [
+    {
+      instanceId: "remote-a",
+      peerId: "peer-a",
+      matchedAttribute: localGroup,
+      matchSource: "local",
+    },
+  ]);
   assert.deepEqual(labels.calls, []);
 });
 

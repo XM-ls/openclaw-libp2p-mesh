@@ -245,6 +245,7 @@ export type InstanceRouterOptions = {
     listAttributes(): Promise<UserPublicAttribute[]>;
   };
   peerLabelStore?: {
+    load?(): Promise<PeerLabelsFile>;
     listLabels(instanceId: string): Promise<LocalPeerLabelAttribute[]>;
   };
 };

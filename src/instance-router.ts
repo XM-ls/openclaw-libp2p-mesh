@@ -9,6 +9,7 @@ import type {
   LocalPeerLabelAttribute,
   MeshConfig,
   P2PMessage,
+  PeerLabelsFile,
   UserAttributeMatch,
   UserAttributeMessageOptions,
   UserAttributeMatchScope,
@@ -100,6 +101,18 @@ function matchesLocalPeerLabel(
     normalizeAttributeKey(attribute.key) === normalizeAttributeKey(match.key) &&
     normalizeAttributeValue(attribute.value) === normalizeAttributeValue(match.value)
   );
+}
+
+function rawPeerLabelsToLocalAttributes(
+  labels: PeerLabelsFile["peers"][string]["labels"] | undefined,
+): LocalPeerLabelAttribute[] {
+  return (labels ?? []).map((label) => ({
+    kind: "structured",
+    key: label.key,
+    value: label.value,
+    label: label.value,
+    source: "local",
+  }));
 }
 
 function buildUserAttributeTarget(
@@ -228,9 +241,20 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     Record<string, LocalPeerLabelAttribute[]>
   > {
     const table = await store.load();
+    const instanceIds = Object.keys(table.instances);
     const result: Record<string, LocalPeerLabelAttribute[]> = {};
 
-    for (const instanceId of Object.keys(table.instances)) {
+    if (options.peerLabelStore?.load) {
+      const labelsFile = await options.peerLabelStore.load();
+      for (const instanceId of instanceIds) {
+        result[instanceId] = rawPeerLabelsToLocalAttributes(
+          labelsFile.peers[instanceId]?.labels,
+        );
+      }
+      return result;
+    }
+
+    for (const instanceId of instanceIds) {
       result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
     }
 
