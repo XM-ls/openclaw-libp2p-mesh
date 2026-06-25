@@ -258,7 +258,7 @@ test("list instances tool prefers record local label snapshots over store labels
     key: "group",
     value: "record",
     label: "group: record",
-    source: "record",
+    source: "local",
   };
   const instanceId = "alpha@MCowBQYDK2Vw.11111111";
   const router = makeRouter({
@@ -297,7 +297,7 @@ test("list instances tool falls back to store labels when record omits local lab
     key: "group",
     value: "store",
     label: "group: store",
-    source: "store",
+    source: "local",
   };
   const instanceId = "beta@MCowBQYDK2Vw.22222222";
   const router = makeRouter({
