@@ -45,7 +45,7 @@ export const LIBP2P_MESH_AGENT_PROMPT = `
    - gateway 的基础 \`instance-announce\` 可能省略 \`userPublicAttributes\`；这表示本次 announce 没有携带属性，不一定表示该用户没有公开属性。按公开属性发送前先用 \`p2p_list_instances\` 查看当前实例记录。
    - 普通对话 agent 不应自己读取 USER.md 来决定公开属性。USER.md 属性提取是 gateway 后台职责。
 
-3. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\` and stay on this machine. \`instance-peer.json.localLabels\` is only a derived local private snapshot for inspection and matching. \`localLabels\` are not remote public attributes, are not produced by remote USER.md/profile, will not be included in \`instance-announce\`, and will not be sent to or shown to the labeled user. \`localLabels\` 不会包含在 \`instance-announce\` 中，也不会发送或展示给被标记用户。本地标签只应在用户本地归类意图下使用 \`scope="local"\`，或在公开属性和本地标签都要匹配时使用 \`scope="all"\`。
+3. \`openclaw libp2p-mesh labels\` manages local labels for remote instances. These labels are stored in the local \`peer-labels.json\` and stay on this machine. \`instance-peer.json.localLabels\` is only a derived local private snapshot for inspection and matching. \`localLabels\` are not remote public attributes, are not produced by remote USER.md/profile, will not be included in \`instance-announce\`, and will not be sent to, shown to, or notified to the labeled user. \`localLabels\` 不会包含在 \`instance-announce\` 中，也不会发送、展示或通知给被标记用户。本地标签只应在用户本地归类意图下使用 \`scope="local"\`，或在公开属性和本地标签都要匹配时使用 \`scope="all"\`。
 
 4. scope 规则：
 

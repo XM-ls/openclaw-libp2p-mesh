@@ -7,6 +7,7 @@ test("agent prompt documents local peer labels command and scope rules", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /openclaw libp2p-mesh labels/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /local labels for remote instances/i);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /peer-labels\.json/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="public"/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="local"/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
@@ -29,8 +30,18 @@ test("agent prompt maps user wording to scope choices", () => {
 test("libp2p prompt explains localLabels snapshot privacy", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /instance-peer\.json/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*私有.*快照/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not remote public attributes/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not produced by remote USER\.md\/profile/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not be sent to, shown to, or notified to the labeled user/s);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*不会.*instance-announce/s);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /本地标签.*scope="local"/s);
+});
+
+test("agent prompt separates public attributes from local labels during troubleshooting", () => {
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /userPublicAttributes.*远端公开广播的用户属性/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*本机私有本地标签快照/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /不要把 `localLabels` 说成远端公开属性/s);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /不要把 `userPublicAttributes` 和 `localLabels` 混为一类/s);
 });
 
 test("agent prompt documents async USER.md public attributes", () => {
