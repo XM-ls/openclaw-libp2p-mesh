@@ -24,6 +24,7 @@ test("agent prompt maps user wording to scope choices", () => {
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="public"/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /both/);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /two sources/);
+  assert.match(LIBP2P_MESH_AGENT_PROMPT, /公开和本地都算.*scope="all"/s);
   assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
 });
 
