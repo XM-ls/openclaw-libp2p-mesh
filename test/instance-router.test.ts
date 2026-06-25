@@ -71,6 +71,32 @@ function makeStore(records: InstancePeerRecord[]): InstancePeerStore {
     async resolve(instanceId: string) {
       return byInstance.get(instanceId);
     },
+    async syncLocalLabels(labelsByInstance) {
+      for (const [instanceId, record] of byInstance) {
+        const labels = labelsByInstance[instanceId] ?? [];
+        if (labels.length === 0) {
+          const { localLabels: _localLabels, ...withoutLocalLabels } = record;
+          byInstance.set(instanceId, withoutLocalLabels);
+        } else {
+          byInstance.set(instanceId, { ...record, localLabels: labels });
+        }
+      }
+      return {
+        version: 1,
+        updatedAt: 1,
+        instances: Object.fromEntries(byInstance),
+      };
+    },
+    async updateLocalLabels(instanceId, labels) {
+      const record = byInstance.get(instanceId);
+      if (!record) return undefined;
+      const next =
+        labels.length === 0
+          ? { ...record, localLabels: undefined }
+          : { ...record, localLabels: labels };
+      byInstance.set(instanceId, next);
+      return next;
+    },
     async upsertFromAnnounce(payload) {
       const previous = byInstance.get(payload.instanceId);
       const record = makeRecord(payload.instanceId, payload.peerId);
@@ -92,6 +118,14 @@ function makeStore(records: InstancePeerRecord[]): InstancePeerStore {
           previous.userPublicAttributes !== record.userPublicAttributes,
         peerIdSharedBy: [],
       };
+    },
+  };
+}
+
+function makeDelivery(): InboundDeliveryAdapter {
+  return {
+    async deliver() {
+      throw new Error("not used");
     },
   };
 }
@@ -371,6 +405,68 @@ test("start attaches handlers once then announces to connected peers", async () 
       ["peer-a", "instance-announce"],
     ],
   );
+});
+
+test("start syncs local label snapshots for existing records", async () => {
+  const sent: SentMessage[] = [];
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const store = makeStore([makeRecord("remote-a", "peer-a")]);
+  const labels = makePeerLabelStore({ "remote-a": [localGroup] });
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: labels.store,
+  });
+
+  await router.start();
+
+  assert.deepEqual((await store.resolve("remote-a"))?.localLabels, [localGroup]);
+});
+
+test("handle announce refreshes local label snapshot for announced record", async () => {
+  const sent: SentMessage[] = [];
+  const localProject: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "小龙虾",
+    label: "小龙虾",
+    source: "local",
+  };
+  const store = makeStore([]);
+  const labels = makePeerLabelStore({ "remote-a": [localProject] });
+  const mesh = makeMesh(sent);
+  const router = createInstanceRouter({
+    mesh,
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: labels.store,
+  });
+  router.attachHandlers();
+
+  mesh.emitMessage({
+    id: "announce-1",
+    type: "instance-announce",
+    from: "peer-a",
+    instanceId: "remote-a",
+    payload: JSON.stringify({
+      instanceId: "remote-a",
+      peerId: "peer-a",
+      instanceName: "Remote A",
+      multiaddrs: [],
+      announcedAt: 123,
+    }),
+    timestamp: 123,
+  });
+
+  await flushMicrotasks();
+  assert.deepEqual((await store.resolve("remote-a"))?.localLabels, [localProject]);
 });
 
 test("sendInstanceMessage returns ACK target results to tool layer", async () => {
@@ -1285,6 +1381,37 @@ test("sendUserAttributeMessage local scope matches peer labels only", async () =
       matchSource: "local",
     },
   ]);
+});
+
+test("local-scope user attribute matching uses record localLabels before peer label fallback", async () => {
+  const sent: SentMessage[] = [];
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "实验室",
+    source: "local",
+  };
+  const store = makeStore([
+    { ...makeRecord("remote-a", "peer-a"), localLabels: [localGroup] },
+  ]);
+  const labels = makePeerLabelStore({});
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: labels.store,
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "我这边准备好了",
+    { dryRun: true, scope: "local" },
+  );
+
+  assert.equal(result.matched, 1);
+  assert.equal(result.targets?.[0]?.matchSource, "local");
+  assert.deepEqual(labels.calls, []);
 });
 
 test("sendUserAttributeMessage public scope does not use local labels", async () => {

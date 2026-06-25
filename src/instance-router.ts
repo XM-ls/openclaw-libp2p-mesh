@@ -224,6 +224,32 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     return identity.id;
   }
 
+  async function buildLocalLabelsByInstance(): Promise<
+    Record<string, LocalPeerLabelAttribute[]>
+  > {
+    const table = await store.load();
+    const result: Record<string, LocalPeerLabelAttribute[]> = {};
+
+    for (const instanceId of Object.keys(table.instances)) {
+      result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
+    }
+
+    return result;
+  }
+
+  async function syncAllLocalLabelSnapshots(): Promise<void> {
+    if (!options.peerLabelStore) return;
+    await store.syncLocalLabels(await buildLocalLabelsByInstance());
+  }
+
+  async function syncLocalLabelSnapshot(instanceId: string): Promise<void> {
+    if (!options.peerLabelStore) return;
+    await store.updateLocalLabels(
+      instanceId,
+      await options.peerLabelStore.listLabels(instanceId),
+    );
+  }
+
   async function loadUserPublicAttributes(loadOptions?: {
     refreshUserMd?: boolean;
   }): Promise<UserPublicAttribute[]> {
@@ -452,6 +478,13 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     const result = await store.upsertFromAnnounce(payload);
+    if (options.peerLabelStore) {
+      await syncLocalLabelSnapshot(payload.instanceId).catch((error) => {
+        logger?.warn?.(
+          `[libp2p-mesh] Failed to sync local labels for ${payload.instanceId}: ${summarizeError(error)}`,
+        );
+      });
+    }
     if (result.changed) {
       logger?.info?.(
         `[libp2p-mesh] Instance mapping updated: ${payload.instanceId} -> ${payload.peerId}`,
@@ -676,6 +709,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
   async function start(): Promise<void> {
     attachHandlers();
+    await syncAllLocalLabelSnapshots().catch((error) => {
+      logger?.warn?.(
+        `[libp2p-mesh] Failed to sync local labels on startup: ${summarizeError(error)}`,
+      );
+    });
     await announceToConnectedPeers();
   }
 
@@ -794,12 +832,17 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
           : record.userPublicAttributes?.find((attribute) =>
               matchesUserAttribute(attribute, match),
             );
-      const localAttribute =
-        scope === "public"
-          ? undefined
-          : (await options.peerLabelStore?.listLabels(record.instanceId))?.find((attribute) =>
-              matchesLocalPeerLabel(attribute, match),
-            );
+      let localAttribute: LocalPeerLabelAttribute | undefined;
+      if (scope !== "public") {
+        const recordLocalLabels = record.localLabels ?? [];
+        const fallbackLocalLabels =
+          recordLocalLabels.length > 0
+            ? recordLocalLabels
+            : (await options.peerLabelStore?.listLabels(record.instanceId)) ?? [];
+        localAttribute = fallbackLocalLabels.find((attribute) =>
+          matchesLocalPeerLabel(attribute, match),
+        );
+      }
 
       if (publicAttribute && localAttribute && scope === "all") {
         targets.push(buildUserAttributeTarget(record, publicAttribute, "all"));
