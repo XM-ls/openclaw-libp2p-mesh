@@ -1,8 +1,10 @@
 import type {
   DeliveryTargetResult,
+  InstancePeerRecord,
   InstanceRouter,
   LocalPeerLabelAttribute,
   MeshNetwork,
+  PeerLabelStore,
   UserAttributeMatch,
   UserAttributeMatchScope,
   UserAttributeMessageDeliveryResult,
@@ -58,6 +60,82 @@ function formatUserAttributeResults(results: UserAttributeMessageDeliveryResult[
 
     return `${instanceTargetLabel(result)}：${status}`;
   });
+}
+
+type ListInstanceRow = InstancePeerRecord & {
+  connected: boolean;
+  localLabels: LocalPeerLabelAttribute[];
+};
+
+type BuildP2PToolsOptions = {
+  peerLabelStore?: Pick<PeerLabelStore, "listLabels">;
+};
+
+function formatPublicAttribute(attribute: UserPublicAttribute): string[] {
+  if (attribute.kind === "tag") {
+    return [
+      "     - kind: tag",
+      `       value: ${attribute.value}`,
+      `       label: ${attribute.label}`,
+      `       source: ${attribute.source}`,
+    ];
+  }
+
+  return [
+    "     - kind: structured",
+    `       key: ${attribute.key}`,
+    `       value: ${attribute.value}`,
+    `       label: ${attribute.label}`,
+    `       source: ${attribute.source}`,
+  ];
+}
+
+function formatLocalLabel(label: LocalPeerLabelAttribute): string[] {
+  return [
+    "     - kind: structured",
+    `       key: ${label.key}`,
+    `       value: ${label.value}`,
+    `       label: ${label.label}`,
+    `       source: ${label.source}`,
+  ];
+}
+
+function formatInstanceList(rows: ListInstanceRow[]): string {
+  if (rows.length === 0) {
+    return "No OpenClaw instances discovered yet.";
+  }
+
+  const lines = [`Discovered OpenClaw instances: ${rows.length}`];
+
+  rows.forEach((entry, index) => {
+    lines.push(
+      "",
+      `${index + 1}. ${entry.instanceId}`,
+      `   peerId: ${entry.peerId}`,
+      `   instanceName: ${entry.instanceName ?? "(none)"}`,
+      `   connected: ${entry.connected}`,
+    );
+
+    if ((entry.userPublicAttributes ?? []).length === 0) {
+      lines.push("   userPublicAttributes: none");
+    } else {
+      lines.push("   userPublicAttributes:");
+      for (const attribute of entry.userPublicAttributes ?? []) {
+        lines.push(...formatPublicAttribute(attribute));
+      }
+    }
+
+    if (entry.localLabels.length === 0) {
+      lines.push("   localLabels: none (local private labels; not broadcast)");
+    } else {
+      lines.push("   localLabels (local private labels; not broadcast):");
+      for (const label of entry.localLabels) {
+        lines.push(...formatLocalLabel(label));
+      }
+    }
+  });
+
+  return lines.join("\n");
 }
 
 type SendUserAttributeToolParams = {
@@ -152,7 +230,11 @@ function normalizeUserAttributeMatch(params: SendUserAttributeToolParams): UserA
   return 'match.kind must be "tag" or "structured".';
 }
 
-export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
+export function buildP2PTools(
+  mesh: MeshNetwork,
+  router?: InstanceRouter,
+  options: BuildP2PToolsOptions = {},
+) {
   return [
     {
       name: "p2p_send_message",
@@ -362,19 +444,24 @@ export function buildP2PTools(mesh: MeshNetwork, router?: InstanceRouter) {
         try {
           const instances = await router.listInstances();
           const connected = new Set(mesh.getConnectedPeers());
-          const rows = instances.map((entry) => ({
-            ...entry,
-            connected: connected.has(entry.peerId),
-          }));
-          const text =
-            rows.length === 0
-              ? "No OpenClaw instances discovered yet."
-              : rows
-                  .map(
-                    (entry) =>
-                      `${entry.instanceId} -> ${entry.peerId}${entry.connected ? " (connected)" : ""}`,
-                  )
-                  .join("\n");
+          const rows = await Promise.all(
+            instances.map(async (entry): Promise<ListInstanceRow> => {
+              const localLabels =
+                entry.localLabels && entry.localLabels.length > 0
+                  ? entry.localLabels
+                  : options.peerLabelStore
+                    ? await options.peerLabelStore.listLabels(entry.instanceId)
+                    : [];
+
+              return {
+                ...entry,
+                userPublicAttributes: entry.userPublicAttributes ?? [],
+                connected: connected.has(entry.peerId),
+                localLabels,
+              };
+            }),
+          );
+          const text = formatInstanceList(rows);
           return {
             content: [{ type: "text" as const, text }],
             details: { instances: rows, count: rows.length },

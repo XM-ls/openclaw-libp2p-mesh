@@ -2,9 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildP2PTools } from "../src/agent-tools.js";
-import type { InstanceRouter, MeshNetwork, UserPublicAttribute } from "../src/types.js";
+import type {
+  InstancePeerRecord,
+  InstanceRouter,
+  LocalPeerLabelAttribute,
+  MeshNetwork,
+  UserPublicAttribute,
+} from "../src/types.js";
 
-function makeMesh(): MeshNetwork {
+function makeMesh(connectedPeers: string[] = []): MeshNetwork {
   return {
     async start() {},
     async stop() {},
@@ -25,7 +31,7 @@ function makeMesh(): MeshNetwork {
       return "local-peer";
     },
     getConnectedPeers() {
-      return [];
+      return connectedPeers;
     },
     getMultiaddrs() {
       return [];
@@ -52,18 +58,23 @@ function makeMesh(): MeshNetwork {
 }
 
 type RouterResults = {
+  listInstances?: InstancePeerRecord[];
   sendInstanceMessage?: Awaited<ReturnType<InstanceRouter["sendInstanceMessage"]>>;
   sendUserAttributeMessage?: Awaited<ReturnType<InstanceRouter["sendUserAttributeMessage"]>>;
 };
 
 function makeRouter(results: Awaited<ReturnType<InstanceRouter["sendInstanceMessage"]>> | RouterResults): InstanceRouter {
   const sendInstanceMessage =
-    "sendInstanceMessage" in results || "sendUserAttributeMessage" in results
+    "listInstances" in results || "sendInstanceMessage" in results || "sendUserAttributeMessage" in results
       ? results.sendInstanceMessage
       : results;
   const sendUserAttributeMessage =
-    "sendInstanceMessage" in results || "sendUserAttributeMessage" in results
+    "listInstances" in results || "sendInstanceMessage" in results || "sendUserAttributeMessage" in results
       ? results.sendUserAttributeMessage
+      : undefined;
+  const listInstances =
+    "listInstances" in results || "sendInstanceMessage" in results || "sendUserAttributeMessage" in results
+      ? results.listInstances
       : undefined;
 
   return {
@@ -72,7 +83,7 @@ function makeRouter(results: Awaited<ReturnType<InstanceRouter["sendInstanceMess
     async handleMessage() {},
     async announceToPeer() {},
     async listInstances() {
-      return [];
+      return listInstances ?? [];
     },
     async resolveInstance() {
       return undefined;
@@ -100,6 +111,22 @@ function makeRouter(results: Awaited<ReturnType<InstanceRouter["sendInstanceMess
       );
     },
   };
+}
+
+function listInstancesTool(options: {
+  router: InstanceRouter;
+  connectedPeers?: string[];
+  localLabels?: Record<string, LocalPeerLabelAttribute[]>;
+}) {
+  const tool = buildP2PTools(makeMesh(options.connectedPeers), options.router, {
+    peerLabelStore: {
+      async listLabels(instanceId: string) {
+        return options.localLabels?.[instanceId] ?? [];
+      },
+    },
+  }).find((candidate) => candidate.name === "p2p_list_instances");
+  assert.ok(tool);
+  return tool;
 }
 
 function sendInstanceTool(router: InstanceRouter) {
@@ -140,6 +167,170 @@ const researchLoopTag: UserPublicAttribute = {
   label: "ResearchLoop",
   source: "USER.md",
 };
+
+test("list instances tool shows complete public attributes and local labels", async () => {
+  const publicTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "P2P",
+    label: "P2P",
+    source: "USER.md",
+  };
+  const publicProject: UserPublicAttribute = {
+    kind: "structured",
+    key: "project",
+    value: "libp2p-mesh",
+    label: "project: libp2p-mesh",
+    source: "profile",
+  };
+  const localGroup: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "实验室",
+    label: "group: 实验室",
+    source: "local",
+  };
+  const longInstanceId = "fhl-enine@MCowBQYDK2Vw.d073ce70";
+  const longPeerId = "12D3KooWLvw2N15n5dNWVAAARjpLif3w18JfwTr36k7rNJFW5AQA";
+  const router = makeRouter({
+    listInstances: [
+      {
+        instanceId: longInstanceId,
+        peerId: longPeerId,
+        instanceName: "fhl-enine",
+        multiaddrs: [],
+        pubkey: "MCowBQYDK2VwAyEAJGsrOQM6Ej08rAe2l8WlgwYp6tan5mAtvl4dVWyDASw",
+        userPublicAttributes: [publicTag, publicProject],
+        lastSeenAt: 1782287927147,
+        lastAnnouncedAt: 1782287927066,
+        source: "announce",
+      },
+      {
+        instanceId: "XXMM-XM@MCowBQYDK2Vw.5e20fcfa",
+        peerId: "12D3KooWLKhCXuddyxMYXiweBBL2vvXkj6aFsmrrMv3Fkq8bbpai",
+        instanceName: "XXMM-XM",
+        multiaddrs: [],
+        userPublicAttributes: [],
+        lastSeenAt: 1782287927382,
+        lastAnnouncedAt: 1782287927315,
+        source: "announce",
+      },
+    ],
+  });
+
+  const response = await listInstancesTool({
+    router,
+    connectedPeers: [longPeerId],
+    localLabels: {
+      [longInstanceId]: [localGroup],
+    },
+  }).execute("call-1", {});
+  const text = response.content.map((item) => item.text).join("\n");
+
+  assert.match(text, /Discovered OpenClaw instances: 2/);
+  assert.match(text, new RegExp(longInstanceId));
+  assert.match(text, new RegExp(longPeerId));
+  assert.doesNotMatch(text, /12D3Koo\.\.\./);
+  assert.match(text, /connected: true/);
+  assert.match(text, /userPublicAttributes:/);
+  assert.match(text, /kind: tag/);
+  assert.match(text, /value: P2P/);
+  assert.match(text, /source: USER\.md/);
+  assert.match(text, /kind: structured/);
+  assert.match(text, /key: project/);
+  assert.match(text, /value: libp2p-mesh/);
+  assert.match(text, /localLabels \(local private labels; not broadcast\):/);
+  assert.match(text, /key: group/);
+  assert.match(text, /value: 实验室/);
+  assert.match(text, /source: local/);
+  assert.match(text, /userPublicAttributes: none/);
+  assert.match(text, /localLabels: none \(local private labels; not broadcast\)/);
+  assert.deepEqual(response.details.instances[0].userPublicAttributes, [publicTag, publicProject]);
+  assert.deepEqual(response.details.instances[0].localLabels, [localGroup]);
+});
+
+test("list instances tool prefers record local label snapshots over store labels", async () => {
+  const recordLabel: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "record",
+    label: "group: record",
+    source: "record",
+  };
+  const storeLabel: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "store",
+    label: "group: store",
+    source: "store",
+  };
+  const instanceId = "alpha@MCowBQYDK2Vw.11111111";
+  const router = makeRouter({
+    listInstances: [
+      {
+        instanceId,
+        peerId: "peer-alpha",
+        instanceName: "alpha",
+        multiaddrs: [],
+        userPublicAttributes: [],
+        localLabels: [recordLabel],
+        lastSeenAt: 1782287927147,
+        lastAnnouncedAt: 1782287927066,
+        source: "announce",
+      },
+    ],
+  });
+
+  const response = await listInstancesTool({
+    router,
+    localLabels: {
+      [instanceId]: [storeLabel],
+    },
+  }).execute("call-1", {});
+  const text = response.content.map((item) => item.text).join("\n");
+
+  assert.match(text, /localLabels \(local private labels; not broadcast\):/);
+  assert.match(text, /value: record/);
+  assert.doesNotMatch(text, /value: store/);
+  assert.deepEqual(response.details.instances[0].localLabels, [recordLabel]);
+});
+
+test("list instances tool falls back to store labels when record has no local labels", async () => {
+  const storeLabel: LocalPeerLabelAttribute = {
+    kind: "structured",
+    key: "group",
+    value: "store",
+    label: "group: store",
+    source: "store",
+  };
+  const instanceId = "beta@MCowBQYDK2Vw.22222222";
+  const router = makeRouter({
+    listInstances: [
+      {
+        instanceId,
+        peerId: "peer-beta",
+        instanceName: "beta",
+        multiaddrs: [],
+        userPublicAttributes: [],
+        localLabels: [],
+        lastSeenAt: 1782287927147,
+        lastAnnouncedAt: 1782287927066,
+        source: "announce",
+      },
+    ],
+  });
+
+  const response = await listInstancesTool({
+    router,
+    localLabels: {
+      [instanceId]: [storeLabel],
+    },
+  }).execute("call-1", {});
+  const text = response.content.map((item) => item.text).join("\n");
+
+  assert.match(text, /localLabels \(local private labels; not broadcast\):/);
+  assert.match(text, /value: store/);
+  assert.deepEqual(response.details.instances[0].localLabels, [storeLabel]);
+});
 
 test("send instance tool shows every target result when at least one target succeeds", async () => {
   const router = makeRouter({
