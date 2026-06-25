@@ -14,6 +14,8 @@ import { registerLibp2pMeshCli } from "./profile-cli.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { MeshConfig } from "./types.js";
 
+const DEFAULT_PUBLIC_ATTRIBUTE_REFRESH_STARTUP_DELAY_MS = 10000;
+
 export type Libp2pMeshPluginDeps = {
   createMeshNetwork?: typeof createMeshNetwork;
   createInstanceRouter?: typeof createInstanceRouter;
@@ -31,6 +33,7 @@ export function registerLibp2pMeshWithDeps(
   let unsubscribeInbound: (() => void) | undefined;
   let serviceStarted = false;
   let startPromise: Promise<void> | undefined;
+  let publicAttributeRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   const mesh = (deps.createMeshNetwork ?? createMeshNetwork)({
     config,
     logger: api.logger,
@@ -65,6 +68,7 @@ export function registerLibp2pMeshWithDeps(
     userAttributeSource,
     userProfileStore,
     peerLabelStore,
+    publicAttributeRefreshInitiallyEnabled: false,
   });
 
   registerLibp2pMeshCli(api, {
@@ -119,7 +123,31 @@ export function registerLibp2pMeshWithDeps(
     });
   }
 
+  function publicAttributeRefreshStartupDelayMs(): number {
+    const configured = config?.publicAttributeRefreshStartupDelayMs;
+    if (typeof configured === "number" && Number.isFinite(configured) && configured >= 0) {
+      return configured;
+    }
+    return DEFAULT_PUBLIC_ATTRIBUTE_REFRESH_STARTUP_DELAY_MS;
+  }
+
+  function clearPublicAttributeRefreshTimer(): void {
+    if (publicAttributeRefreshTimer) {
+      clearTimeout(publicAttributeRefreshTimer);
+      publicAttributeRefreshTimer = undefined;
+    }
+  }
+
+  function schedulePublicAttributeRefreshEnable(): void {
+    clearPublicAttributeRefreshTimer();
+    publicAttributeRefreshTimer = setTimeout(() => {
+      publicAttributeRefreshTimer = undefined;
+      router.enablePublicAttributeRefresh();
+    }, publicAttributeRefreshStartupDelayMs());
+  }
+
   async function cleanupStartupFailure(): Promise<void> {
+    clearPublicAttributeRefreshTimer();
     try {
       unsubscribeInbound?.();
     } catch (error) {
@@ -168,7 +196,7 @@ export function registerLibp2pMeshWithDeps(
           router.attachHandlers();
           unsubscribeInbound = attachInboundHandlers();
           await mesh.start();
-          await router.announceToConnectedPeers();
+          await router.start();
           const identity = mesh.getInstanceIdentity();
           api.logger.info?.(
             `[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`,
@@ -191,6 +219,7 @@ export function registerLibp2pMeshWithDeps(
             );
           }
           serviceStarted = true;
+          schedulePublicAttributeRefreshEnable();
         } catch (error) {
           await cleanupStartupFailure();
           throw error;
@@ -203,6 +232,7 @@ export function registerLibp2pMeshWithDeps(
     },
     stop: async () => {
       await startPromise?.catch(() => undefined);
+      clearPublicAttributeRefreshTimer();
       unsubscribeInbound?.();
       unsubscribeInbound = undefined;
       await router.stop();
@@ -218,7 +248,7 @@ export function registerLibp2pMeshWithDeps(
   });
 
   // 3. Register Agent Tools
-  const tools = buildP2PTools(mesh, router);
+  const tools = buildP2PTools(mesh, router, { peerLabelStore });
   for (const tool of tools) {
     api.registerTool(tool as never);
   }

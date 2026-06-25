@@ -104,6 +104,12 @@ function makeRouter(calls: string[]): InstanceRouter {
     },
     async handleMessage() {},
     async announceToPeer() {},
+    enablePublicAttributeRefresh() {
+      calls.push("router.enablePublicAttributeRefresh");
+    },
+    async refreshPublicAttributes() {
+      calls.push("router.refreshPublicAttributes");
+    },
     async listInstances() {
       return [];
     },
@@ -191,7 +197,7 @@ test("service registers router and inbound handlers before mesh startup", async 
     "router.attachHandlers",
     "inbound.attach",
     "mesh.start",
-    "router.announceToConnectedPeers",
+    "router.start",
   ]);
   assert.ok(
     infoLogs.some((message) => message.includes("Direct message from remote-peer")),
@@ -214,6 +220,25 @@ test("service registers router and inbound handlers before mesh startup", async 
   assert.ok(calls.includes("inbound.unsubscribe"));
   assert.ok(calls.includes("router.stop"));
   assert.ok(calls.includes("mesh.stop"));
+});
+
+test("service enables queued public attribute refresh after startup delay", async () => {
+  const calls: string[] = [];
+  const { api, services } = makeApi(calls);
+  api.pluginConfig = { publicAttributeRefreshStartupDelayMs: 0 };
+
+  registerLibp2pMeshWithDeps(api, {
+    createMeshNetwork: () => makeMesh(calls),
+    createInstanceRouter: () => makeRouter(calls),
+  });
+
+  await services[0].start();
+  assert.equal(calls.includes("router.enablePublicAttributeRefresh"), false);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(calls.includes("router.enablePublicAttributeRefresh"), true);
+  await services[0].stop();
 });
 
 test("service cleans inbound handlers after mesh startup failure before retry", async () => {
@@ -306,9 +331,9 @@ test("concurrent service starts share one startup and handler registration", asy
     "concurrent starts should share one mesh startup",
   );
   assert.equal(
-    calls.filter((call) => call === "router.announceToConnectedPeers").length,
+    calls.filter((call) => call === "router.start").length,
     1,
-    "concurrent starts should announce once after mesh startup",
+    "concurrent starts should run router startup once after mesh startup",
   );
 
   await services[0].stop();

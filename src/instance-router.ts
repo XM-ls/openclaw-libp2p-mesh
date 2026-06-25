@@ -61,6 +61,10 @@ function summarizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function formatInboundUserMessageText(payload: UserMessagePayload): string {
+  return `[来自 ${payload.fromInstanceId}]\n${payload.text}`;
+}
+
 function effectiveAnnounceLogDetail(value: unknown): AnnounceLogDetail {
   if (value === "off" || value === "payload") {
     return value;
@@ -227,6 +231,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
   const deliveryCache = new Map<string, DeliveryCacheEntry>();
   const unsubs: Array<() => void> = [];
   const pendingAttributePeers = new Set<string>();
+  let publicAttributeRefreshEnabled = options.publicAttributeRefreshInitiallyEnabled !== false;
   let attributeRefreshPromise: Promise<void> | undefined;
 
   function localInstanceId(): string {
@@ -392,7 +397,9 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       return;
     }
 
-    drainAttributeRefresh();
+    if (publicAttributeRefreshEnabled) {
+      drainAttributeRefresh();
+    }
   }
 
   function drainAttributeRefresh(): Promise<void> {
@@ -413,6 +420,13 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     return attributeRefreshPromise;
+  }
+
+  function enablePublicAttributeRefresh(): void {
+    publicAttributeRefreshEnabled = true;
+    if (pendingAttributePeers.size > 0) {
+      drainAttributeRefresh();
+    }
   }
 
   async function announceToPeer(peerId: string): Promise<void> {
@@ -616,7 +630,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
           const result = await delivery.deliver({
             channel: target.channel,
             target: target.target,
-            text: payload.text,
+            text: formatInboundUserMessageText(payload),
             metadata: {
               fromInstanceId: payload.fromInstanceId,
               fromPeerId: msg.from,
@@ -869,12 +883,11 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
             );
       let localAttribute: LocalPeerLabelAttribute | undefined;
       if (scope !== "public") {
-        const recordLocalLabels = record.localLabels ?? [];
-        const fallbackLocalLabels =
-          recordLocalLabels.length > 0
-            ? recordLocalLabels
+        const labels =
+          record.localLabels !== undefined
+            ? record.localLabels
             : (await options.peerLabelStore?.listLabels(record.instanceId)) ?? [];
-        localAttribute = fallbackLocalLabels.find((attribute) =>
+        localAttribute = labels.find((attribute) =>
           matchesLocalPeerLabel(attribute, match),
         );
       }
@@ -970,6 +983,7 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     stop,
     handleMessage,
     announceToPeer,
+    enablePublicAttributeRefresh,
     refreshPublicAttributes,
     listInstances,
     resolveInstance,

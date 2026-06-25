@@ -911,6 +911,52 @@ test("announceToPeer sends base announce first without userPublicAttributes then
   assert.deepEqual(attributePayload.userPublicAttributes, [userMdTag, profileAttribute]);
 });
 
+test("announceToPeer queues attribute refresh until public attribute refresh is enabled", async () => {
+  const sent: SentMessage[] = [];
+  let refreshCalls = 0;
+  const userMdTag: UserPublicAttribute = {
+    kind: "tag",
+    value: "P2P",
+    label: "P2P",
+    source: "USER.md",
+  };
+  const router = createInstanceRouter({
+    mesh: makeMesh(sent),
+    store: makeStore([]),
+    delivery: {
+      async deliver() {
+        throw new Error("not used");
+      },
+    },
+    publicAttributeRefreshInitiallyEnabled: false,
+    userAttributeSource: {
+      async loadTags() {
+        return [];
+      },
+      async refreshTags() {
+        refreshCalls += 1;
+        return [userMdTag];
+      },
+    },
+  });
+
+  await router.announceToPeer("remote-peer");
+  await flushMicrotasks();
+
+  assert.equal(refreshCalls, 0);
+  assert.equal(sent.length, 1);
+  assert.equal("userPublicAttributes" in JSON.parse(sent[0].message.payload), false);
+
+  router.enablePublicAttributeRefresh();
+  await flushMicrotasks();
+
+  assert.equal(refreshCalls, 1);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(JSON.parse(sent[1].message.payload).userPublicAttributes, [
+    userMdTag,
+  ]);
+});
+
 test("queued attribute refresh includes peers announced during slow refresh", async () => {
   const sent: SentMessage[] = [];
   let releaseRefresh: (() => void) | undefined;
@@ -1679,6 +1725,38 @@ test("local-scope user attribute matching uses record localLabels before peer la
   assert.deepEqual(labels.calls, []);
 });
 
+test("local-scope user attribute matching respects empty localLabels snapshot", async () => {
+  const store = makeStore([
+    { ...makeRecord("remote-a", "peer-a"), localLabels: [] },
+  ]);
+  const labels = makePeerLabelStore({
+    "remote-a": [
+      {
+        kind: "structured",
+        key: "group",
+        value: "实验室",
+        label: "实验室",
+        source: "local",
+      },
+    ],
+  });
+  const router = createInstanceRouter({
+    mesh: makeMesh([]),
+    store,
+    delivery: makeDelivery(),
+    peerLabelStore: labels.store,
+  });
+
+  const result = await router.sendUserAttributeMessage(
+    { kind: "structured", key: "group", value: "实验室" },
+    "我这边准备好了",
+    { dryRun: true, scope: "local" },
+  );
+
+  assert.equal(result.matched, 0);
+  assert.deepEqual(labels.calls, []);
+});
+
 test("all-scope user attribute matching uses record localLabels before peer label fallback", async () => {
   const publicProject: UserPublicAttribute = {
     kind: "structured",
@@ -2015,6 +2093,7 @@ test("legacy single-target config still delivers once", async () => {
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0].channel, "feishu");
   assert.equal(deliveries[0].target, "user:ou_1");
+  assert.equal(deliveries[0].text, "[来自 remote-instance]\nhello");
   const ack = parseAck(sent);
   assert.equal(ack.ok, true);
   assert.equal(ack.inboundChannel, "feishu");
