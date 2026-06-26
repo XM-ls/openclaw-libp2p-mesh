@@ -1,0 +1,116 @@
+{
+  "name": "libp2p-mesh",
+  "version": "2026.6.25",
+  "description": "OpenClaw libp2p P2P mesh network plugin for cross-instance agent communication",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "dist",
+    "index.ts",
+    "api.ts",
+    "src",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@libp2p/bootstrap": "^9.0.12",
+    "@libp2p/kad-dht": "^10.0.0",
+    "@libp2p/mdns": "^9.0.14",
+    "@libp2p/mplex": "^9.0.12",
+    "@libp2p/noise": "^12.0.1",
+    "@libp2p/peer-id": "^3.0.6",
+    "@libp2p/peer-id-factory": "^3.0.11",
+    "@libp2p/tcp": "^8.0.13",
+    "@libp2p/websockets": "^7.0.13",
+    "@multiformats/multiaddr": "^12.5.1",
+    "it-length-prefixed": "^9.0.1",
+    "it-pipe": "^3.0.1",
+    "libp2p": "^0.46.16",
+    "uint8arraylist": "^2.4.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "openclaw": "^2026.5.7",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "libp2p-mesh",
+      "label": "P2P Mesh",
+      "selectionLabel": "P2P Mesh",
+      "detailLabel": "P2P Mesh",
+      "docsPath": "/channels/libp2p-mesh",
+      "docsLabel": "libp2p-mesh",
+      "blurb": "libp2p mesh network for cross-instance agent communication.",
+      "systemImage": "network"
+    },
+    "install": {
+      "npmSpec": "libp2p-mesh",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.24"
+    },
+    "bundle": {
+      "stageRuntimeDependencies": true
+    },
+    "release": {
+      "publishToNpm": true
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "default": "./dist/api.js"
+    }
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "libp2p",
+    "p2p",
+    "mesh",
+    "decentralized"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XM-ls/openclaw-libp2p-mesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/XM-ls/openclaw-libp2p-mesh/issues"
+  },
+  "homepage": "https://github.com/XM-ls/openclaw-libp2p-mesh#readme",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@google/genai",
+      "esbuild",
+      "koffi",
+      "openclaw",
+      "protobufjs",
+      "tree-sitter-bash"
+    ]
+  }
+}
