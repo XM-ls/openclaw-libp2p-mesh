@@ -50,13 +50,36 @@ openclaw plugins registry --refresh
 
 ---
 
-## 3. 安装后要做什么
+## 3. 安装后展示流程
 
 安装完成后，建议重启 gateway：
 
 ```bash
 openclaw gateway restart
 ```
+
+重启后，通常会看到这些变化：
+
+1. gateway 启动日志里出现 `libp2p-mesh` 的启动信息
+2. 日志里会显示本机 Peer ID
+3. 如果已经成功生成实例身份，会显示 Instance ID
+4. 如果 NAT traversal 已启用，会显示 identify / AutoNAT / UPnP / relay / DCUtR 等状态
+5. 如果你安装时没有删掉默认提示词区块，`AGENTS.md` 也会自动更新
+
+示例日志大概长这样：
+
+```text
+[libp2p-mesh] Service started. Peer ID: 12D3KooW...
+[libp2p-mesh] Instance Identity: alice-mac@MCowBQYDK2Vw....
+[libp2p-mesh] NAT traversal services: identify, autoNAT, upnp, circuitRelay, dcutr
+```
+
+你可以把它理解成：
+
+- `Service started` 表示插件已真正跑起来
+- `Peer ID` 是 libp2p 节点身份
+- `Instance Identity` 是 OpenClaw 实例身份
+- `NAT traversal services` 表示网络能力已启用
 
 安装后插件会自动做两件事：
 
@@ -149,6 +172,8 @@ openclaw libp2p-mesh setup
 
 ### 推荐做法
 
+现在的插件默认会把 OpenClaw 已经添加好的 channel 作为可接收消息的入口，你只需要为这些 channel 手动配置对应的 `target`。
+
 现在的 setup 向导支持：
 
 - 从当前已经存在的 `channels` 同步入站目标
@@ -162,6 +187,57 @@ openclaw libp2p-mesh setup
 ```
 
 如果你后来新增了一个 channel，再运行一次 `setup`，它会继续帮你补齐缺失项，不会覆盖已有配置。
+
+### 配置流程
+
+如果你第一次配置入站消息投递，可以按这个顺序来：
+
+1. 先确认你本机已经添加好了要接收消息的 OpenClaw channel，例如飞书、QQ 或 Telegram。
+2. 运行 `openclaw libp2p-mesh setup`。
+3. 在 `Configure inbound delivery targets?` 里选择 `Sync from configured channels`。
+4. 向导会按你当前已经添加好的 channel 逐个询问 `Target for <channel>`。
+5. 依次填好每个 channel 的 target。
+6. 预览配置，确认 `inboundTargets` 已经列出每个 channel 的 target。
+7. 确认应用后重启 gateway，让新的配置生效。
+
+如果你只是临时不想接收消息，可以直接把 `inboundTargets` 设为空数组，不需要配置具体 target。
+
+### 向导交互示例
+
+```text
+$ openclaw libp2p-mesh setup
+
+libp2p-mesh is not configured yet.
+
+This wizard will create:
+plugins.entries["libp2p-mesh"]
+
+Continue? Yes
+Choose setup mode: LAN: same WiFi / local network
+Configure inbound delivery targets? Sync from configured channels
+Target for feishu: user:ou_xxx
+Target for qqbot: user:123456
+Preview: plugins.entries["libp2p-mesh"]
+
+{
+  "enabled": true,
+  "config": {
+    "discovery": "mdns",
+    "deliveryAckTimeoutMs": 15000,
+    "inboundTargets": [
+      {
+        "channel": "feishu",
+        "target": "user:ou_xxx"
+      },
+      {
+        "channel": "qqbot",
+        "target": "user:123456"
+      }
+    ]
+  }
+}
+Apply this config? Yes
+```
 
 ### 入站目标示例
 
@@ -189,25 +265,90 @@ QQ 单聊示例：
 
 ---
 
-## 8. 消息怎么发
+## 8. 在 channel 中给别人发消息
 
-### 按 Peer ID 直发
+可以先在 channel 中先查看当前连接节点的属性，然后再根据方式一或者方式二发送消息给其他的用户。
+channel 中可直接使用的消息模板：
 
-如果你知道对方的 libp2p `Peer ID`，可以直接发送：
+```text
+列出当前节点的属性
+```
+下面是一个返回结果示例：
 
-```bash
-openclaw message send libp2p-mesh <PEER-ID> "你好"
+```text
+Discovered OpenClaw instances: 2
+
+1. alice-mac@AQIDBAUGBweI.7a3f9e2b
+   peerId: 12D3KooW...
+   instanceName: alice-mac
+   connected: true
+   userPublicAttributes:
+     kind: tag
+     value: P2P
+     label: P2P
+     source: USER.md
+     kind: structured
+     key: project
+     value: openclaw
+     label: project: openclaw
+     source: profile
+   localLabels:
+     kind: structured
+     key: group
+     value: 实验室
+     label: group: 实验室
+     source: local
+
+2. bob-mac@AQIDBAUGBweI.1a2b3c4d
+   peerId: 12D3KooX...
+   instanceName: bob-mac
+   connected: true
+   userPublicAttributes: none
+   localLabels: none
 ```
 
-### 按 OpenClaw Instance ID 发
+### 方式一：按 OpenClaw Instance ID 发
 
 更常见的是按 OpenClaw 的 `instanceId` 发消息。你不需要自己找对方的 libp2p `Peer ID`，插件会在实例发现后负责把消息路由到对应 peer。
 
-在对端正确上线并完成实例发现后，发送流程会自动走 `p2p_send_instance_message` 这条路径。
+这也是你在 OpenClaw 的 channel 里最常用的方式。
 
-### 广播
+channel 中可直接使用的消息模板：
 
-如果你需要在 mesh 内广播消息，可以使用广播能力。广播适合做发现、通知或调试，不适合发私密内容。
+```text
+请给实例 `<instanceId>` 发消息：`<消息内容>`
+```
+
+示例：
+
+```text
+请给实例 `alice-mac@MCowBQYDK2Vw...` 发消息：今晚 8 点开会，记得上线。
+```
+
+### 方式二：按属性找人群发
+
+如果你想给某一类人发消息，可以用公开属性或本地标签先筛选，再发给匹配到的实例。
+
+例如：
+
+- `group=实验室`
+- `project=openclaw`
+- `tag:P2P`
+- `#P2P`
+
+这类能力适合群发，不适合点对点私聊。
+
+channel 中可直接使用的消息模板：
+
+```text
+请给公开属性为group=实验室的节点发送消息：`<消息内容>`
+```
+
+示例：
+
+```text
+请给本地标签和公开属性都为project=openclaw的节点发送消息：今晚 8 点开会，记得上线。
+```
 
 ---
 
@@ -235,6 +376,42 @@ openclaw libp2p-mesh profile
 - role
 - skill
 
+### 交互示例
+
+```text
+$ openclaw libp2p-mesh profile
+
+Read-only USER.md tags:
+  1. P2P (USER.md tag, read-only)
+  2. OpenClaw (USER.md tag, read-only)
+
+Structured profile attributes:
+  none
+
+What do you want to do? Add structured attribute
+Attribute category: Project
+Attribute value: openclaw
+
+Read-only USER.md tags:
+  1. P2P (USER.md tag, read-only)
+  2. OpenClaw (USER.md tag, read-only)
+
+Structured profile attributes:
+  1. project: openclaw
+
+What do you want to do? Preview and finish
+Preview: public attributes
+
+Read-only USER.md tags:
+  1. P2P (USER.md tag, read-only)
+  2. OpenClaw (USER.md tag, read-only)
+
+Structured profile attributes to save:
+  1. project: openclaw
+
+Save profile attributes? Yes
+```
+
 ### 本地标签
 
 本地标签是你在自己机器上给远端实例做的私有分类，不会广播给对方。
@@ -251,6 +428,33 @@ openclaw libp2p-mesh labels
 - 谁是常联系对象
 - 谁该优先接收哪类消息
 
+### 交互示例
+
+```text
+$ openclaw libp2p-mesh labels
+
+Discovered instances:
+  1. alice-mac alice-mac@AQIDBAUGBweI.7a3f9e2b (public attributes: P2P, project: openclaw)
+  2. bob-mac bob-mac@AQIDBAUGBweI.1a2b3c4d (public attributes: none)
+
+Instance to label: alice-mac alice-mac@AQIDBAUGBweI.7a3f9e2b (public attributes: P2P, project: openclaw)
+Selected instance: alice-mac alice-mac@AQIDBAUGBweI.7a3f9e2b (public attributes: P2P, project: openclaw)
+
+Local labels:
+  none
+
+What do you want to do? Add local label
+Label category: Group
+Label value: 实验室
+
+Selected instance: alice-mac alice-mac@AQIDBAUGBweI.7a3f9e2b (public attributes: P2P, project: openclaw)
+
+Local labels:
+  1. group: 实验室
+
+What do you want to do? Save and finish
+```
+
 ---
 
 ## 10. 排查与调试
@@ -265,13 +469,7 @@ openclaw libp2p-mesh labels
 openclaw libp2p-mesh debug
 ```
 
-### 查看 announce 日志
-
-```bash
-openclaw libp2p-mesh debug
-```
-
-默认推荐保持 `summary`，只在排查时临时切换到更详细的输出。
+`debug` 命令会显示 announce 日志级别，默认推荐保持 `summary`。只有排查发现、地址或属性广播问题时，才临时切到更详细的输出。
 
 ### 重新安装提示词区块
 
@@ -314,9 +512,6 @@ openclaw libp2p-mesh setup
 
 这是正常的。`USER.md` 的公开 tag 是异步提取的，可能要等后续完整的 `instance-announce` 广播后才会出现在发现结果里。
 
-### 4. 我不想手动改 `openclaw.json`
-
-正常情况下不需要。安装、网络配置、入站目标配置都可以通过 `setup` / `profile` / `labels` / `debug` 这些命令完成。
 
 ---
 
@@ -327,7 +522,7 @@ openclaw libp2p-mesh setup
 1. 安装插件
 
 ```bash
-openclaw install libp2p-mesh
+openclaw plugins install libp2p-mesh
 ```
 
 2. 重启 gateway
@@ -352,13 +547,3 @@ openclaw libp2p-mesh labels
 ```
 
 ---
-
-## 13. 一句话总结
-
-安装 `libp2p-mesh` 后，普通用户通常只需要：
-
-- 安装插件
-- 重启 gateway
-- 必要时运行一次 `setup` 补齐网络或入站目标
-
-多数默认场景不需要手动编辑配置文件。

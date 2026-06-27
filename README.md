@@ -23,7 +23,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 ### Method 1: Via OpenClaw CLI (Recommended)
 
 ```bash
-openclaw install libp2p-mesh
+openclaw plugins install libp2p-mesh
 ```
 
 ### Method 2: Manual (npm)
@@ -91,7 +91,7 @@ openclaw plugins update libp2p-mesh@latest
 如果是首次安装，也可以使用：
 
 ```bash
-openclaw install libp2p-mesh
+openclaw plugins install libp2p-mesh
 ```
 
 安装或更新后，插件会自动安装或更新 `~/.openclaw/workspace/AGENTS.md` 中由 `libp2p-mesh` 管理的提示词区块，并在未显式配置时使用 mDNS、NAT traversal、DHT 和 delivery ACK timeout 的默认网络设置。
