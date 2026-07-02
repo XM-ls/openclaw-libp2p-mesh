@@ -1,7 +1,7 @@
 import type { AnnounceLogDetail, InboundTargetConfig, MeshConfig } from "./types.js";
 export declare const LIBP2P_MESH_PLUGIN_ID = "libp2p-mesh";
 export declare const DEFAULT_DELIVERY_ACK_TIMEOUT_MS = 15000;
-export type SetupMode = "lan" | "cross-network" | "relay-node" | "tools-only";
+export type SetupMode = "lan" | "cross-network" | "relay-node";
 export type OpenClawConfigLike = {
     plugins?: {
         entries?: Record<string, {

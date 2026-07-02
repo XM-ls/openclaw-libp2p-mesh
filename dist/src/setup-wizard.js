@@ -51,11 +51,11 @@ async function runFirstConfigFlow(options) {
     }
     const mode = await selectSetupMode(options.prompter);
     let pluginConfig = await buildNetworkConfigFromPrompts(mode, options.prompter);
-    const inboundChoice = await options.prompter.select("Configure inbound delivery targets?", [
-        { label: "Sync from configured channels", value: "sync-from-channels" },
-        { label: "Add one or more targets", value: "add-targets" },
-        { label: "Disable inbound delivery for now", value: "disable-inbound" },
-        { label: "Skip for now", value: "skip-inbound" },
+    const inboundChoice = await options.prompter.select("Configure where received P2P messages should appear?", [
+        { label: "Sync from existing channels", value: "sync-from-channels" },
+        { label: "Add a target manually", value: "add-targets" },
+        { label: "Do not receive P2P messages in local channels", value: "disable-inbound" },
+        { label: "Leave unchanged for now", value: "skip-inbound" },
     ]);
     switch (inboundChoice) {
         case "sync-from-channels":
@@ -78,8 +78,8 @@ async function runExistingConfigFlow(existingConfig, options) {
         options.prompter.print(formatCurrentConfig(pluginConfig));
         const editChoice = await options.prompter.select("What do you want to edit?", [
             { label: "Sync inbound targets from channels", value: "sync-from-channels" },
-            { label: "Network mode", value: "network-mode" },
-            { label: "Inbound delivery targets", value: "inbound-targets" },
+            { label: "Network setup", value: "network-mode" },
+            { label: "Where received P2P messages appear", value: "inbound-targets" },
             { label: "Preview and apply", value: "preview-apply" },
             { label: "Cancel", value: "cancel" },
         ]);
@@ -133,27 +133,64 @@ async function syncInboundTargetsFromConfiguredChannels(pluginConfig, options) {
         options.prompter.print("All configured channels already have inbound targets.");
         return setInboundTargets(pluginConfig, plan.targets);
     }
+    options.prompter.print(formatInboundSyncPlan(plan));
     let targets = plan.targets.map((target) => ({ ...target }));
+    const added = [];
+    const skipped = [];
     for (const channel of plan.missingChannels) {
-        const target = await options.prompter.input(`Target for ${channel}`, { required: true });
+        const target = (await options.prompter.input(`${targetPromptForChannel(channel)} (leave empty to skip)`, { required: false })).trim();
+        if (!target) {
+            skipped.push(channel);
+            continue;
+        }
         const addResult = addInboundTarget(targets, { channel, target });
         if (!addResult.ok) {
             options.prompter.print(addResult.error);
             continue;
         }
         targets = addResult.targets;
+        added.push(addResult.added);
     }
+    options.prompter.print(formatInboundSyncResult({ added, skipped }));
     return setInboundTargets(pluginConfig, targets);
+}
+function formatInboundSyncPlan(plan) {
+    const alreadyConfigured = plan.targets.length > 0 ? plan.targets.map((target) => `  - ${formatInboundTargetLine(target)}`) : ["  none"];
+    const missingChannels = plan.missingChannels.length > 0 ? plan.missingChannels.map((channel) => `  - ${channel}`) : ["  none"];
+    return [
+        "Already configured:",
+        ...alreadyConfigured,
+        "",
+        "Channels without inbound targets:",
+        ...missingChannels,
+        "",
+        "Leave a target empty to skip that channel.",
+    ].join("\n");
+}
+function formatInboundSyncResult(result) {
+    const lines = [];
+    if (result.added.length > 0) {
+        lines.push("Added:", ...result.added.map((target) => `  - ${formatInboundTargetLine(target)}`));
+    }
+    else {
+        lines.push("No inbound targets were added.");
+    }
+    if (result.skipped.length > 0) {
+        lines.push("", "Skipped:", ...result.skipped.map((channel) => `  - ${channel}`));
+    }
+    return lines.join("\n");
+}
+function formatInboundTargetLine(target) {
+    return `${target.id ?? "(unnamed)"}     ${target.channel} / ${target.target}`;
 }
 function hasLegacyOnlyInboundConfig(pluginConfig) {
     return Boolean(pluginConfig.inboundChannel && pluginConfig.inboundTarget && !Array.isArray(pluginConfig.inboundTargets));
 }
 async function selectSetupMode(prompter) {
-    return prompter.select("Choose setup mode:", [
-        { label: "LAN: same WiFi / local network", value: "lan" },
-        { label: "Cross-network: use bootstrap/relay", value: "cross-network" },
-        { label: "Relay node: this machine has a public address", value: "relay-node" },
-        { label: "Tools only: no inbound delivery", value: "tools-only" },
+    return prompter.select("Choose network setup:", [
+        { label: "Use default LAN discovery", value: "lan" },
+        { label: "Add bootstrap / relay addresses for cross-network use", value: "cross-network" },
+        { label: "Configure this machine as a public relay node", value: "relay-node" },
     ]);
 }
 async function buildNetworkConfigFromPrompts(mode, prompter) {
@@ -162,13 +199,13 @@ async function buildNetworkConfigFromPrompts(mode, prompter) {
             return buildNetworkConfig("cross-network", {
                 crossNetwork: {
                     bootstrapList: await promptForAddressList(prompter, "Bootstrap multiaddr", "Add another bootstrap?"),
-                    relayList: await promptForOptionalAddressList(prompter, "Relay multiaddr", "Add another relay?"),
+                    relayList: await promptForOptionalAddressList(prompter, "Relay multiaddr (optional, leave empty to skip)", "Add another relay?"),
                 },
             });
         case "relay-node":
             return buildNetworkConfig("relay-node", {
                 relayNode: {
-                    listenAddrs: [await prompter.input("Listen address", { required: true })],
+                    listenAddrs: [await prompter.input("Listen address", { defaultValue: "/ip4/0.0.0.0/tcp/4001", required: true })],
                     announceAddrs: [await prompter.input("Public announce address", { required: true })],
                 },
             });
@@ -204,7 +241,7 @@ async function promptForInboundTargets(existingTargets, options, promptOptions) 
         : "add-target";
     while (action === "add-target") {
         const channel = await promptForChannel(options);
-        const target = await options.prompter.input("Target", { required: true });
+        const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
         const addResult = addInboundTarget(targets, { channel, target });
         if (addResult.ok) {
             targets = addResult.targets;
@@ -249,7 +286,7 @@ async function promptForInboundTargetEdits(existingTargets, options) {
 }
 async function promptForOneInboundTarget(targets, options) {
     const channel = await promptForChannel(options);
-    const target = await options.prompter.input("Target", { required: true });
+    const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
     const addResult = addInboundTarget(targets, { channel, target });
     if (addResult.ok) {
         return addResult.targets;
@@ -264,7 +301,7 @@ async function promptForInboundTargetEdit(targets, options) {
     }
     const selectedIndex = await selectInboundTargetIndex(options.prompter, "Target to edit", targets);
     const channel = await promptForChannel(options);
-    const target = await options.prompter.input("Target", { required: true });
+    const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
     const duplicate = targets.some((existingTarget, index) => index !== selectedIndex && existingTarget.channel === channel && existingTarget.target === target);
     if (duplicate) {
         options.prompter.print(`inbound target already exists: ${channel} / ${target}`);
@@ -315,6 +352,9 @@ async function promptForChannel(options) {
         return options.prompter.input("Channel name", { required: true });
     }
     return channel;
+}
+function targetPromptForChannel(channel) {
+    return `Target for ${channel}`;
 }
 function formatCurrentConfig(pluginConfig) {
     const targets = pluginConfig.inboundTargets ?? [];

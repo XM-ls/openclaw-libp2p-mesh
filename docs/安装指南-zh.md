@@ -149,12 +149,22 @@ openclaw libp2p-mesh setup
 
 这个向导会写入 `plugins.entries["libp2p-mesh"].config`，不会去写 `channels["libp2p-mesh"]`。
 
-常见网络模式：
+配置向导会把网络配置和入站投递分开处理。
 
-- `LAN`：同一局域网
-- `Cross-network`：通过 bootstrap 或 relay 连接
-- `Relay node`：当前机器作为中继节点
-- `Tools only`：只需要工具能力，不接收消息
+网络配置只决定当前节点如何发现或连接其他节点：
+
+- 使用默认局域网发现。
+- 添加 bootstrap / relay 地址用于跨网络连接。
+- 将当前机器配置为公网 relay 节点。
+
+入站投递配置决定收到 P2P 消息后显示到哪里：
+
+- 从现有 channels 同步。
+- 手动添加一个 target。
+- 不把 P2P 消息投递到本地 channel。
+- 暂时保持不变。
+
+从现有 channels 同步时，某个 channel 的 target 可以直接留空，表示跳过该 channel。
 
 如果你只是普通用户，通常只需要保留默认网络设置，不必改。
 
@@ -194,9 +204,9 @@ openclaw libp2p-mesh setup
 
 1. 先确认你本机已经添加好了要接收消息的 OpenClaw channel，例如飞书、QQ 或 Telegram。
 2. 运行 `openclaw libp2p-mesh setup`。
-3. 在 `Configure inbound delivery targets?` 里选择 `Sync from configured channels`。
-4. 向导会按你当前已经添加好的 channel 逐个询问 `Target for <channel>`。
-5. 依次填好每个 channel 的 target。
+3. 在 `Configure where received P2P messages should appear?` 里选择 `Sync from existing channels`。
+4. 向导会按你当前已经添加好的 channel 逐个询问 `Target for <channel> (leave empty to skip)`。
+5. 依次填好要接收 P2P 消息的 channel target；不想配置的 channel 直接留空跳过。
 6. 预览配置，确认 `inboundTargets` 已经列出每个 channel 的 target。
 7. 确认应用后重启 gateway，让新的配置生效。
 
@@ -213,10 +223,21 @@ This wizard will create:
 plugins.entries["libp2p-mesh"]
 
 Continue? Yes
-Choose setup mode: LAN: same WiFi / local network
-Configure inbound delivery targets? Sync from configured channels
-Target for feishu: user:ou_xxx
-Target for qqbot: user:123456
+Choose network setup: Use default LAN discovery
+Configure where received P2P messages should appear? Sync from existing channels
+Already configured:
+  none
+
+Channels without inbound targets:
+  - feishu
+  - qqbot
+
+Leave a target empty to skip that channel.
+Target for feishu (leave empty to skip): user:ou_xxx
+Target for qqbot (leave empty to skip): user:123456
+Added:
+  - feishu-main     feishu / user:ou_xxx
+  - qqbot-main     qqbot / user:123456
 Preview: plugins.entries["libp2p-mesh"]
 
 {

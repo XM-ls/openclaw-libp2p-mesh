@@ -108,12 +108,22 @@ openclaw gateway restart
 openclaw libp2p-mesh setup
 ```
 
-这个向导会写入 `plugins.entries["libp2p-mesh"].config`，不会写入 `channels["libp2p-mesh"]`。常见选择：
+这个向导会写入 `plugins.entries["libp2p-mesh"].config`，不会写入 `channels["libp2p-mesh"]`。
 
-- 同一局域网测试：选择 LAN / mDNS。
-- 跨网络或需要 relay：选择 bootstrap / relay 相关模式。
-- 需要把收到的 P2P 消息投递到飞书、QQ、Telegram 等 channel：配置 `inboundTargets`。
-- 暂时只需要工具能力、不接收消息：选择禁用入站投递，写入 `inboundTargets: []`。
+向导会把网络配置和入站投递分开处理。网络配置只决定当前节点如何发现或连接其他节点：
+
+- 使用默认局域网发现。
+- 添加 bootstrap / relay 地址用于跨网络连接。
+- 将当前机器配置为公网 relay 节点。
+
+入站投递配置决定收到 P2P 消息后显示到哪里：
+
+- 从现有 channels 同步。
+- 手动添加一个 target。
+- 不把 P2P 消息投递到本地 channel。
+- 暂时保持不变。
+
+从现有 channels 同步时，某个 channel 的 target 可以直接留空，表示跳过该 channel。
 
 入站目标示例：
 
@@ -241,7 +251,7 @@ Use the interactive setup command for advanced network settings and later edits:
 openclaw libp2p-mesh setup
 ```
 
-The wizard enables the plugin when needed and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. It can update the network mode, sync inbound delivery targets from the currently configured channels, add or remove targets manually, preview the final JSON, and only writes after you confirm.
+The wizard enables the plugin when needed and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. It separates network setup from inbound delivery: network setup chooses LAN discovery, bootstrap/relay addresses, or public relay-node parameters; inbound delivery chooses where received P2P messages should appear. It can sync inbound delivery targets from the currently configured channels, add or remove targets manually, preview the final JSON, and only writes after you confirm. When syncing from existing channels, leave a target empty to skip that channel.
 
 The wizard uses OpenClaw's config writer, so the actual file is your normal OpenClaw config path, usually `~/.openclaw/openclaw.json`. You do not need to manually edit `openclaw.json`, and the wizard does not create `channels["libp2p-mesh"]`.
 
@@ -296,7 +306,7 @@ By default, the node picks a random TCP port. To use a fixed port:
 
 ### With Bootstrap Nodes (Cross-Network)
 
-If peers are on different networks, run the setup wizard and choose cross-network mode. It prompts for bootstrap and optional relay multiaddrs, then writes:
+If peers are on different networks, run the setup wizard and choose cross-network setup. It prompts for bootstrap and optional relay multiaddrs, then writes:
 
 ```json
 {
@@ -323,7 +333,7 @@ If peers are on different networks, run the setup wizard and choose cross-networ
 
 ### Multiple Inbound Targets
 
-Inbound delivery is owned by the receiving OpenClaw instance. In the setup wizard, choose to sync inbound delivery targets from the currently configured channels or add them manually. The sender still sends to the receiver's peer ID or instance ID; the receiver decides which local channels display the incoming message.
+Inbound delivery is owned by the receiving OpenClaw instance. In the setup wizard, choose where received P2P messages should appear: sync from existing channels, add a target manually, disable local-channel delivery, or leave the current setting unchanged. When syncing from existing channels, leave a target empty to skip that channel. The sender still sends to the receiver's peer ID or instance ID; the receiver decides which local channels display the incoming message.
 
 Example wizard output with two targets:
 

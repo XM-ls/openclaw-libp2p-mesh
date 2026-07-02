@@ -16,12 +16,6 @@ export function buildNetworkConfig(mode, options) {
                 discovery: "mdns",
                 deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
             };
-        case "tools-only":
-            return {
-                discovery: "mdns",
-                inboundTargets: [],
-                deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
-            };
         case "cross-network": {
             const relayList = options?.crossNetwork?.relayList;
             return {
