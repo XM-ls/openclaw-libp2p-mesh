@@ -253,7 +253,9 @@ export interface MeshConfig {
     enableWebSocket?: boolean;
     peerIdPath?: string;
     instanceName?: string;
-    /** Enable DHT for WAN peer discovery and pubkey registry (default: true when discovery=dht, false otherwise) */
+    /** Enable mDNS LAN peer discovery (default: true) */
+    enableMDNS?: boolean;
+    /** Enable DHT for WAN peer discovery and pubkey registry (default: true) */
     enableDHT?: boolean;
     /**
      * Master switch for the NAT traversal stack. When `false` none of the

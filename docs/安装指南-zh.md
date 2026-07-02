@@ -19,7 +19,7 @@
 - Node.js 版本不低于 `22`
 - 如果你只打算在同一局域网内使用，两个设备需要在同一个 Wi-Fi 或同一个网段
 
-如果你还打算跨网络连接，后面需要额外配置 bootstrap 或 relay。
+如果你还打算跨网络连接，后面可以额外配置 bootstrap 或 relay 入口地址。
 
 ---
 
@@ -124,7 +124,7 @@ openclaw gateway restart
 
 ### 场景 B：跨网络连接
 
-如果两台机器不在同一个局域网，建议使用 setup 向导配置 bootstrap 或 relay。
+如果两台机器不在同一个局域网，建议使用 setup 向导补充 bootstrap 或 relay 入口地址。
 
 ```bash
 openclaw libp2p-mesh setup
@@ -151,11 +151,11 @@ openclaw libp2p-mesh setup
 
 配置向导会把网络配置和入站投递分开处理。
 
-网络配置只决定当前节点如何发现或连接其他节点：
+插件安装后默认已经启用 mDNS、DHT、NAT traversal、relay transport 和 hole punching。网络配置不是让你选择某一种网络模式，而是按需补充入口信息：
 
-- 使用默认局域网发现。
 - 添加 bootstrap / relay 地址用于跨网络连接。
 - 将当前机器配置为公网 relay 节点。
+- 没有入口地址时保持默认自动发现能力不变。
 
 入站投递配置决定收到 P2P 消息后显示到哪里：
 
@@ -166,7 +166,7 @@ openclaw libp2p-mesh setup
 
 从现有 channels 同步时，某个 channel 的 target 可以直接留空，表示跳过该 channel。
 
-如果你只是普通用户，通常只需要保留默认网络设置，不必改。
+如果你只是普通用户，通常不需要改网络配置；安装后重启 gateway 即可先试用。
 
 ---
 
@@ -223,7 +223,9 @@ This wizard will create:
 plugins.entries["libp2p-mesh"]
 
 Continue? Yes
-Choose network setup: Use default LAN discovery
+Network discovery is enabled automatically.
+Bootstrap multiaddr (leave empty to skip):
+Relay multiaddr (leave empty to skip):
 Configure where received P2P messages should appear? Sync from existing channels
 Already configured:
   none
@@ -243,7 +245,6 @@ Preview: plugins.entries["libp2p-mesh"]
 {
   "enabled": true,
   "config": {
-    "discovery": "mdns",
     "deliveryAckTimeoutMs": 15000,
     "inboundTargets": [
       {

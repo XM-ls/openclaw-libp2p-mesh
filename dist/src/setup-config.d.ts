@@ -21,6 +21,17 @@ export type RelayNodeOptions = {
     listenAddrs: string[];
     announceAddrs: string[];
 };
+export type NetworkEntryOptions = {
+    bootstrapList: string[];
+    relayList: string[];
+};
+export type PublicRelayNodeOptions = {
+    enabled: false;
+} | {
+    enabled: true;
+    listenAddrs: string[];
+    announceAddrs: string[];
+};
 export type AddInboundTargetResult = {
     ok: true;
     targets: InboundTargetConfig[];
@@ -42,6 +53,8 @@ export declare function buildNetworkConfig(mode: SetupMode, options?: {
     crossNetwork?: CrossNetworkOptions;
     relayNode?: RelayNodeOptions;
 }): MeshConfig;
+export declare function buildNetworkEntryConfig(options: NetworkEntryOptions): MeshConfig;
+export declare function buildPublicRelayNodeConfig(options: PublicRelayNodeOptions): MeshConfig;
 export declare function applyDefaultMeshConfig(config: MeshConfig | undefined): MeshConfig;
 export declare function applyPluginConfig(config: OpenClawConfigLike, pluginConfig: MeshConfig): OpenClawConfigLike;
 export declare function applyAnnounceLogDetail(config: OpenClawConfigLike, announceLogDetail: AnnounceLogDetail): OpenClawConfigLike;

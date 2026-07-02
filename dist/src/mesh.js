@@ -58,6 +58,13 @@ async function loadOrCreatePeerId(customPath) {
         return peerId;
     }
 }
+export function planPeerDiscovery(config) {
+    return {
+        useMDNS: config.enableMDNS !== false,
+        bootstrapList: config.bootstrapList ?? [],
+        enableDHT: config.enableDHT !== false,
+    };
+}
 export function createMeshNetwork(options) {
     const config = options.config ?? {};
     const logger = options.logger;
@@ -97,28 +104,18 @@ export function createMeshNetwork(options) {
             transports.push(webSockets());
         }
         // Peer discovery: mDNS for LAN, bootstrap for WAN entry points
+        const discoveryPlan = planPeerDiscovery(config);
         const peerDiscovery = [];
-        const discoveryMechanism = config.discovery ?? "mdns";
-        if (discoveryMechanism === "mdns") {
+        if (discoveryPlan.useMDNS) {
             peerDiscovery.push(mdns({ interval: 1000 }));
             logger?.info?.("[libp2p-mesh] Using mDNS discovery (LAN)");
         }
-        if (discoveryMechanism === "bootstrap" || discoveryMechanism === "dht") {
-            const bootstrapList = config.bootstrapList ?? [];
-            if (bootstrapList.length > 0) {
-                peerDiscovery.push(bootstrap({ list: bootstrapList }));
-                logger?.info?.(`[libp2p-mesh] Using bootstrap discovery (${bootstrapList.length} node(s))`);
-            }
-            else if (discoveryMechanism === "bootstrap") {
-                logger?.warn?.("[libp2p-mesh] discovery=bootstrap but bootstrapList is empty; falling back to mDNS");
-                peerDiscovery.push(mdns({ interval: 1000 }));
-            }
-            else {
-                logger?.warn?.("[libp2p-mesh] discovery=dht but bootstrapList is empty; DHT may not find peers");
-            }
+        if (discoveryPlan.bootstrapList.length > 0) {
+            peerDiscovery.push(bootstrap({ list: discoveryPlan.bootstrapList }));
+            logger?.info?.(`[libp2p-mesh] Using bootstrap discovery (${discoveryPlan.bootstrapList.length} node(s))`);
         }
         // Configure DHT for both WAN peer discovery and pubkey registry
-        const enableDHT = discoveryMechanism === "dht" || config.enableDHT !== false;
+        const enableDHT = discoveryPlan.enableDHT;
         const services = {};
         if (enableDHT) {
             services.dht = kadDHT({

@@ -7,7 +7,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 - **LAN Discovery** — Auto-discovers peers on the same local network via mDNS (Bonjour/Avahi)
 - **Direct Messaging** — Send messages directly to another peer by its Peer ID
 - **Broadcast** — Publish messages to a shared topic, flood-fill forwarded across the mesh
-- **Bootstrap Mode** — Optional static bootstrap peer list for non-LAN scenarios
+- **Bootstrap Entries** — Optional static bootstrap peer list for non-LAN scenarios
 - **WebSocket Transport** — Optional WebSocket support for NAT/firewall-friendly connections
 - **NAT Traversal** — Built-in AutoNAT + UPnP + Circuit Relay v2 + DCUtR for peers behind home routers / firewalls
 - **User Public Attributes** — Announce public tags and structured profile attributes so agents can dry-run and send to locally discovered instances by attribute
@@ -69,7 +69,6 @@ The default generated config shape is:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "deliveryAckTimeoutMs": 15000
         }
       }
@@ -251,7 +250,7 @@ Use the interactive setup command for advanced network settings and later edits:
 openclaw libp2p-mesh setup
 ```
 
-The wizard enables the plugin when needed and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. It separates network setup from inbound delivery: network setup chooses LAN discovery, bootstrap/relay addresses, or public relay-node parameters; inbound delivery chooses where received P2P messages should appear. It can sync inbound delivery targets from the currently configured channels, add or remove targets manually, preview the final JSON, and only writes after you confirm. When syncing from existing channels, leave a target empty to skip that channel.
+The wizard enables the plugin when needed and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. Network discovery is automatic: mDNS, DHT, NAT traversal, relay transport, and hole punching are enabled by default. Network setup only adds optional bootstrap/relay entry addresses or public relay-node parameters; inbound delivery chooses where received P2P messages should appear. After each edit action, the wizard previews the final JSON and only writes after you confirm. When syncing from existing channels, leave a target empty to skip that channel.
 
 The wizard uses OpenClaw's config writer, so the actual file is your normal OpenClaw config path, usually `~/.openclaw/openclaw.json`. You do not need to manually edit `openclaw.json`, and the wizard does not create `channels["libp2p-mesh"]`.
 
@@ -272,7 +271,6 @@ For two computers on the same WiFi or Ethernet segment, no setup wizard is requi
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "deliveryAckTimeoutMs": 15000
         }
       }
@@ -281,7 +279,7 @@ For two computers on the same WiFi or Ethernet segment, no setup wizard is requi
 }
 ```
 
-This is sufficient for two computers on the same WiFi to discover each other.
+This is sufficient for two computers on the same WiFi to discover each other. The runtime still enables mDNS and DHT automatically even when these fields are not written to `openclaw.json`.
 
 ### With Static Port (Optional)
 
@@ -294,7 +292,6 @@ By default, the node picks a random TCP port. To use a fixed port:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
           "deliveryAckTimeoutMs": 15000
         }
@@ -306,7 +303,7 @@ By default, the node picks a random TCP port. To use a fixed port:
 
 ### With Bootstrap Nodes (Cross-Network)
 
-If peers are on different networks, run the setup wizard and choose cross-network setup. It prompts for bootstrap and optional relay multiaddrs, then writes:
+If peers are on different networks, run the setup wizard and add bootstrap and optional relay multiaddrs. These addresses are entry points; they do not replace LAN discovery or DHT. The address prompts can be left empty if you do not have an entry node yet.
 
 ```json
 {
@@ -315,7 +312,6 @@ If peers are on different networks, run the setup wizard and choose cross-networ
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "bootstrapList": [
             "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
           ],
@@ -344,7 +340,6 @@ Example wizard output with two targets:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -371,19 +366,21 @@ If `inboundTargets` is an empty array, inbound delivery is disabled. If `inbound
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `discovery` | `string` | `"mdns"` | Discovery mechanism: `"mdns"` (LAN), `"bootstrap"` (static list), `"dht"` (Kademlia peer discovery and pubkey registry) |
+| `discovery` | `string` | legacy-compatible | Legacy hint. New setup does not write this field; runtime composes discovery from mDNS, DHT, and optional entry lists. |
 | `listenAddrs` | `string[]` | `["/ip4/0.0.0.0/tcp/0"]` | libp2p listen multiaddrs |
-| `bootstrapList` | `string[]` | `[]` | Static bootstrap peer multiaddrs (when `discovery=bootstrap`) |
+| `bootstrapList` | `string[]` | `[]` | Optional static bootstrap peer multiaddrs. Non-empty values add bootstrap discovery without disabling mDNS or DHT. |
 | `enableWebSocket` | `boolean` | `false` | Enable WebSocket transport for browser/NAT compatibility |
 | `meshTopic` | `string` | `"openclaw-mesh"` | Default broadcast topic |
 | `enableAgentSync` | `boolean` | `true` | Enable agent state synchronization over the mesh |
 | `enableNATTraversal` | `boolean` | `true` | Master switch for identify + AutoNAT + UPnP + Circuit Relay v2 + DCUtR |
+| `enableMDNS` | `boolean` | `true` | Enable mDNS LAN peer discovery |
 | `enableIdentify` | `boolean` | `true` | libp2p identify protocol (required by AutoNAT and DCUtR) |
 | `enableAutoNAT` | `boolean` | `true` | AutoNAT — detect whether this node is publicly reachable |
 | `enableUPnP` | `boolean` | `true` | Attempt UPnP/PMP port mapping on the local gateway |
 | `enableCircuitRelay` | `boolean` | `true` | Dial peers via /p2p-circuit relay addresses |
 | `enableCircuitRelayServer` | `boolean` | `false` | Act as a Circuit Relay v2 server (only enable on a public node) |
 | `enableDCUtR` | `boolean` | `true` | Hole-punching: upgrade a relayed connection to a direct one |
+| `enableDHT` | `boolean` | `true` | Enable DHT for WAN peer discovery and the pubkey registry |
 | `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
 | `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
@@ -435,7 +432,6 @@ You need at least one relay node with a public IP. Set it in `relayList`:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "bootstrapList": [
             "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
           ],
@@ -464,7 +460,6 @@ Add `enableCircuitRelayServer: true` to your config and announce the public addr
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
           "announceAddrs": ["/ip4/<PUBLIC-IP>/tcp/4001"],
           "enableNATTraversal": true,
@@ -567,7 +562,6 @@ Example result for a single Feishu target:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -595,7 +589,6 @@ The receiver chooses where inbound P2P messages appear:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -843,10 +836,9 @@ Privacy boundary: public attributes are broadcast with instance announce message
 3. **Check mDNS** — Ensure mDNS/Bonjour/Avahi is running:
    - macOS: built-in, should work
    - Linux: `sudo systemctl status avahi-daemon`
-4. **Use static port + manual IP** — If mDNS still fails, switch to bootstrap mode and use the LAN IP directly:
+4. **Use static port + manual IP** — If mDNS still fails, add the other node as a bootstrap entry by LAN IP:
    ```json
    {
-     "discovery": "bootstrap",
      "bootstrapList": [
        "/ip4/192.168.1.42/tcp/4001/p2p/<PEER-ID-OF-OTHER-MACHINE>"
      ]

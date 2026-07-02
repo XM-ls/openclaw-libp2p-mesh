@@ -37,6 +37,27 @@ export function buildNetworkConfig(mode, options) {
             };
     }
 }
+export function buildNetworkEntryConfig(options) {
+    return {
+        ...(options.bootstrapList.length > 0 ? { bootstrapList: [...options.bootstrapList] } : {}),
+        ...(options.relayList.length > 0 ? { relayList: [...options.relayList] } : {}),
+        deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    };
+}
+export function buildPublicRelayNodeConfig(options) {
+    if (!options.enabled) {
+        return {
+            enableCircuitRelayServer: false,
+            deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+        };
+    }
+    return {
+        listenAddrs: [...options.listenAddrs],
+        ...(options.announceAddrs.length > 0 ? { announceAddrs: [...options.announceAddrs] } : {}),
+        enableCircuitRelayServer: true,
+        deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    };
+}
 export function applyDefaultMeshConfig(config) {
     const base = config && typeof config === "object" && !Array.isArray(config)
         ? config
