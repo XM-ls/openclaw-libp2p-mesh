@@ -111,6 +111,22 @@ test("buildPublicRelayNodeConfig enables relay server with optional announce add
   );
 });
 
+test("buildPublicRelayNodeConfig includes provided announce addresses", () => {
+  assert.deepEqual(
+    buildPublicRelayNodeConfig({
+      enabled: true,
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+    }),
+    {
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+      enableCircuitRelayServer: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    },
+  );
+});
+
 test("buildPublicRelayNodeConfig disables relay server without touching entry addresses", () => {
   assert.deepEqual(buildPublicRelayNodeConfig({ enabled: false }), {
     enableCircuitRelayServer: false,
