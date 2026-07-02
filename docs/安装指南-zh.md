@@ -212,6 +212,58 @@ openclaw libp2p-mesh setup
 
 如果你只是临时不想接收消息，可以直接把 `inboundTargets` 设为空数组，不需要配置具体 target。
 
+### target 从哪里获取
+
+`target` 不是 `libp2p-mesh` 自动猜出来的，而是每个 OpenClaw channel 自己的收件目标。
+
+获取方式：启动 gateway 之后，在对应 channel 中发送 `你好`，gateway 日志会打印这个 channel 的 target 或者可以用来推导 target 的关键字段。
+
+- **飞书 / Feishu**：通常是用户的接收地址，例如 `user:ou_xxx`
+- **QQBot**：通常从 channel 日志里拿到 `senderId`，然后写成 `c2c:<senderId>`
+
+注意：
+
+- Feishu 没有默认投递目标，还是需要手动配置这个 `target`
+- QQBot 没有默认投递目标，还是需要手动配置这个 `target`
+
+### 日志示例
+
+#### Feishu 日志示例
+
+启动 gateway 后，在 Feishu channel 中发送 `你好`，日志通常会打印出可用于配置的接收目标信息，例如：
+
+```text
+[feishu] [default] Processing message from ou_61d015f8121d6d9dc12bd0d61e91da34: 你好
+```
+
+如果你在 Feishu 侧配置的是机器人用户接收地址，那么就把它写成：
+
+```json
+{
+  "id": "feishu-main",
+  "channel": "feishu",
+  "target": "user:ou_61d015f8121d6d9dc12bd0d61e91da34"
+}
+```
+
+#### QQBot 日志示例
+
+启动 gateway 后，在 QQBot channel 中发送 `你好`，日志通常会打印 `senderId`，例如：
+
+```text
+[qqbot] [default] Processing message from 539865303E7D95EB0D0E8A82851D047E: 你好 {"accountId":"default","senderId":"539865303E7D95EB0D0E8A82851D047E","type":"c2c"}
+```
+
+这时就可以把它写成：
+
+```json
+{
+  "id": "qqbot-main",
+  "channel": "qqbot",
+  "target": "c2c:539865303E7D95EB0D0E8A82851D047E"
+}
+```
+
 ### 向导交互示例
 
 ```text
@@ -236,10 +288,10 @@ Channels without inbound targets:
 
 Leave a target empty to skip that channel.
 Target for feishu (leave empty to skip): user:ou_xxx
-Target for qqbot (leave empty to skip): user:123456
+Target for qqbot (leave empty to skip): c2c:539865303E7D95EB0D0E8A82851D047E
 Added:
   - feishu-main     feishu / user:ou_xxx
-  - qqbot-main     qqbot / user:123456
+  - qqbot-main     qqbot / c2c:539865303E7D95EB0D0E8A82851D047E
 Preview: plugins.entries["libp2p-mesh"]
 
 {
@@ -253,7 +305,7 @@ Preview: plugins.entries["libp2p-mesh"]
       },
       {
         "channel": "qqbot",
-        "target": "user:123456"
+        "target": "c2c:539865303E7D95EB0D0E8A82851D047E"
       }
     ]
   }
@@ -261,25 +313,7 @@ Preview: plugins.entries["libp2p-mesh"]
 Apply this config? Yes
 ```
 
-### 入站目标示例
 
-```json
-{
-  "id": "feishu-main",
-  "channel": "feishu",
-  "target": "user:ou_xxx"
-}
-```
-
-QQ 单聊示例：
-
-```json
-{
-  "id": "qqbot-main",
-  "channel": "qqbot",
-  "target": "user:<senderId>"
-}
-```
 
 ### 关闭入站投递
 
