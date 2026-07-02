@@ -567,7 +567,11 @@ test("runSetupWizard can disable public relay-node settings", async () => {
         entries: {
           "libp2p-mesh": {
             enabled: true,
-            config: { enableCircuitRelayServer: true },
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+              enableCircuitRelayServer: true,
+            },
           },
         },
       },
@@ -599,7 +603,10 @@ test("runSetupWizard can disable public relay-node settings", async () => {
   });
 
   assert.equal(result.status, "applied");
-  assert.equal(writtenConfig.plugins.entries["libp2p-mesh"].config.enableCircuitRelayServer, false);
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"]);
+  assert.equal(pluginConfig.enableCircuitRelayServer, false);
 });
 
 test("runSetupWizard enables public relay node with default listen address and optional announce", async () => {
@@ -612,7 +619,10 @@ test("runSetupWizard enables public relay node with default listen address and o
         entries: {
           "libp2p-mesh": {
             enabled: true,
-            config: {},
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+            },
           },
         },
       },
@@ -656,6 +666,8 @@ test("runSetupWizard enables public relay node with default listen address and o
 
   assert.equal(result.status, "applied");
   const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"]);
   assert.deepEqual(pluginConfig.listenAddrs, ["/ip4/0.0.0.0/tcp/4001"]);
   assert.equal(pluginConfig.enableCircuitRelayServer, true);
   assert.equal(pluginConfig.announceAddrs, undefined);

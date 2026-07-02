@@ -7,7 +7,6 @@ import {
   disableInboundDelivery,
   getLibp2pMeshConfig,
   listConfiguredChannels,
-  mergeNetworkConfig,
   planInboundTargetSync,
   migrateLegacyInboundConfig,
   setInboundTargets,
@@ -335,7 +334,12 @@ async function promptForPublicRelayNodeConfig(existing: MeshConfig, prompter: Se
       })
     : buildPublicRelayNodeConfig({ enabled: false });
 
-  return mergeNetworkConfig(existing, relayConfig);
+  return {
+    ...existing,
+    enableCircuitRelayServer: relayConfig.enableCircuitRelayServer,
+    ...(relayConfig.listenAddrs ? { listenAddrs: relayConfig.listenAddrs } : {}),
+    ...(relayConfig.announceAddrs ? { announceAddrs: relayConfig.announceAddrs } : {}),
+  };
 }
 
 async function promptForOptionalAddressList(
