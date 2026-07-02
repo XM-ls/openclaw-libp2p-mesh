@@ -32,11 +32,12 @@ function createLibp2pMeshConfigSchema() {
                     type: "string",
                     enum: ["mdns", "bootstrap", "dht"],
                     default: "mdns",
+                    description: "Legacy discovery hint. Runtime now composes mDNS, DHT, and optional bootstrap entries automatically.",
                 },
                 bootstrapList: {
                     type: "array",
                     items: { type: "string" },
-                    description: "List of bootstrap multiaddrs for WAN discovery (required when discovery=dht or bootstrap)",
+                    description: "Optional static bootstrap multiaddrs. Non-empty values add bootstrap discovery without disabling mDNS or DHT.",
                 },
                 meshTopic: {
                     type: "string",
@@ -53,7 +54,7 @@ function createLibp2pMeshConfigSchema() {
                 enableDHT: {
                     type: "boolean",
                     default: true,
-                    description: "Enable DHT for WAN peer discovery and pubkey registry. Default true when discovery=dht, can be explicitly disabled.",
+                    description: "Enable DHT for WAN peer discovery and pubkey registry. Default true; can be explicitly disabled.",
                 },
                 instanceName: {
                     type: "string",
