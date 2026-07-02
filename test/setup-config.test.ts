@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyDefaultMeshConfig,
+  buildNetworkEntryConfig,
   buildNetworkConfig,
+  buildPublicRelayNodeConfig,
   DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
   planInboundTargetSync,
 } from "../src/setup-config.js";
@@ -74,58 +76,46 @@ test("buildNetworkConfig returns LAN discovery config", () => {
   });
 });
 
-test("buildNetworkConfig returns cross-network config without empty relayList", () => {
-  assert.deepEqual(
-    buildNetworkConfig("cross-network", {
-      crossNetwork: {
-        bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
-        relayList: [],
-      },
-    }),
-    {
-      discovery: "bootstrap",
-      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
-      enableNATTraversal: true,
-      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
-    },
-  );
+test("buildNetworkEntryConfig omits empty bootstrap and relay lists", () => {
+  assert.deepEqual(buildNetworkEntryConfig({ bootstrapList: [], relayList: [] }), {
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
 });
 
-test("buildNetworkConfig returns cross-network config with relayList when provided", () => {
+test("buildNetworkEntryConfig writes provided entry address lists without discovery mode", () => {
   assert.deepEqual(
-    buildNetworkConfig("cross-network", {
-      crossNetwork: {
-        bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
-        relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
-      },
-    }),
-    {
-      discovery: "bootstrap",
+    buildNetworkEntryConfig({
       bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
       relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
-      enableNATTraversal: true,
+    }),
+    {
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
       deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
     },
   );
 });
 
-test("buildNetworkConfig returns relay-node config", () => {
+test("buildPublicRelayNodeConfig enables relay server with optional announce address", () => {
   assert.deepEqual(
-    buildNetworkConfig("relay-node", {
-      relayNode: {
-        listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
-        announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
-      },
+    buildPublicRelayNodeConfig({
+      enabled: true,
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: [],
     }),
     {
-      discovery: "bootstrap",
       listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
-      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
-      enableNATTraversal: true,
       enableCircuitRelayServer: true,
       deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
     },
   );
+});
+
+test("buildPublicRelayNodeConfig disables relay server without touching entry addresses", () => {
+  assert.deepEqual(buildPublicRelayNodeConfig({ enabled: false }), {
+    enableCircuitRelayServer: false,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
 });
 
 test("planInboundTargetSync preserves existing targets and reports missing channels", () => {

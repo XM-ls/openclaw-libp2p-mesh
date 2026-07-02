@@ -28,6 +28,15 @@ export type RelayNodeOptions = {
   announceAddrs: string[];
 };
 
+export type NetworkEntryOptions = {
+  bootstrapList: string[];
+  relayList: string[];
+};
+
+export type PublicRelayNodeOptions =
+  | { enabled: false }
+  | { enabled: true; listenAddrs: string[]; announceAddrs: string[] };
+
 export type AddInboundTargetResult =
   | { ok: true; targets: InboundTargetConfig[]; added: InboundTargetConfig }
   | { ok: false; targets: InboundTargetConfig[]; error: string };
@@ -86,6 +95,30 @@ export function buildNetworkConfig(
         deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
       };
   }
+}
+
+export function buildNetworkEntryConfig(options: NetworkEntryOptions): MeshConfig {
+  return {
+    ...(options.bootstrapList.length > 0 ? { bootstrapList: [...options.bootstrapList] } : {}),
+    ...(options.relayList.length > 0 ? { relayList: [...options.relayList] } : {}),
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  };
+}
+
+export function buildPublicRelayNodeConfig(options: PublicRelayNodeOptions): MeshConfig {
+  if (!options.enabled) {
+    return {
+      enableCircuitRelayServer: false,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    };
+  }
+
+  return {
+    listenAddrs: [...options.listenAddrs],
+    ...(options.announceAddrs.length > 0 ? { announceAddrs: [...options.announceAddrs] } : {}),
+    enableCircuitRelayServer: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  };
 }
 
 export function applyDefaultMeshConfig(config: MeshConfig | undefined): MeshConfig {
