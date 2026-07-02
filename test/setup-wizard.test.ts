@@ -500,6 +500,59 @@ test("runSetupWizard keeps existing network entry addresses when inputs are empt
   ]);
 });
 
+test("runSetupWizard treats whitespace network entry inputs as empty and trims replacements", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = ["   ", "  /ip4/8.8.8.8/tcp/4001/p2p/12D3TrimmedRelay  "];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another relay?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/8.8.8.8/tcp/4001/p2p/12D3TrimmedRelay"]);
+});
+
 test("runSetupWizard replaces network entry addresses when new values are entered", async () => {
   const selections = ["network-entry-addresses"];
   const inputs = [
@@ -570,6 +623,8 @@ test("runSetupWizard can disable public relay-node settings", async () => {
             config: {
               bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
               relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+              listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+              announceAddrs: ["/ip4/203.0.113.10/tcp/4001/p2p/12D3Announce"],
               enableCircuitRelayServer: true,
             },
           },
@@ -606,6 +661,8 @@ test("runSetupWizard can disable public relay-node settings", async () => {
   const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
   assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
   assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"]);
+  assert.equal(pluginConfig.listenAddrs, undefined);
+  assert.equal(pluginConfig.announceAddrs, undefined);
   assert.equal(pluginConfig.enableCircuitRelayServer, false);
 });
 
@@ -622,6 +679,7 @@ test("runSetupWizard enables public relay node with default listen address and o
             config: {
               bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
               relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+              announceAddrs: ["/ip4/203.0.113.10/tcp/4001/p2p/12D3OldAnnounce"],
             },
           },
         },

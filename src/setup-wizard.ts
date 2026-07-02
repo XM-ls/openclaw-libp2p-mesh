@@ -333,9 +333,15 @@ async function promptForPublicRelayNodeConfig(existing: MeshConfig, prompter: Se
         ),
       })
     : buildPublicRelayNodeConfig({ enabled: false });
+  const {
+    listenAddrs: _listenAddrs,
+    announceAddrs: _announceAddrs,
+    enableCircuitRelayServer: _enableCircuitRelayServer,
+    ...preserved
+  } = existing;
 
   return {
-    ...existing,
+    ...preserved,
     enableCircuitRelayServer: relayConfig.enableCircuitRelayServer,
     ...(relayConfig.listenAddrs ? { listenAddrs: relayConfig.listenAddrs } : {}),
     ...(relayConfig.announceAddrs ? { announceAddrs: relayConfig.announceAddrs } : {}),
@@ -347,13 +353,13 @@ async function promptForOptionalAddressList(
   message: string,
   addAnotherMessage: string,
 ): Promise<string[]> {
-  const firstAddress = await prompter.input(message, { required: false });
+  const firstAddress = (await prompter.input(message, { required: false })).trim();
   if (!firstAddress) {
     return [];
   }
   const addresses = [firstAddress];
   while (await prompter.confirm(addAnotherMessage, false)) {
-    addresses.push(await prompter.input(message, { required: true }));
+    addresses.push((await prompter.input(message, { required: true })).trim());
   }
   return addresses;
 }
