@@ -3,7 +3,7 @@ import type { AnnounceLogDetail, InboundTargetConfig, MeshConfig } from "./types
 export const LIBP2P_MESH_PLUGIN_ID = "libp2p-mesh";
 export const DEFAULT_DELIVERY_ACK_TIMEOUT_MS = 15000;
 
-export type SetupMode = "lan" | "cross-network" | "relay-node" | "tools-only";
+export type SetupMode = "lan" | "cross-network" | "relay-node";
 
 export type OpenClawConfigLike = {
   plugins?: {
@@ -62,13 +62,6 @@ export function buildNetworkConfig(
     case "lan":
       return {
         discovery: "mdns",
-        deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
-      };
-
-    case "tools-only":
-      return {
-        discovery: "mdns",
-        inboundTargets: [],
         deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
       };
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyDefaultMeshConfig,
+  buildNetworkConfig,
   DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
   planInboundTargetSync,
 } from "../src/setup-config.js";
@@ -64,6 +65,67 @@ test("applyDefaultMeshConfig treats non-object config as missing config", () => 
     enableDHT: true,
     deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
   });
+});
+
+test("buildNetworkConfig returns LAN discovery config", () => {
+  assert.deepEqual(buildNetworkConfig("lan"), {
+    discovery: "mdns",
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
+});
+
+test("buildNetworkConfig returns cross-network config without empty relayList", () => {
+  assert.deepEqual(
+    buildNetworkConfig("cross-network", {
+      crossNetwork: {
+        bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+        relayList: [],
+      },
+    }),
+    {
+      discovery: "bootstrap",
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+      enableNATTraversal: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    },
+  );
+});
+
+test("buildNetworkConfig returns cross-network config with relayList when provided", () => {
+  assert.deepEqual(
+    buildNetworkConfig("cross-network", {
+      crossNetwork: {
+        bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+        relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+      },
+    }),
+    {
+      discovery: "bootstrap",
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+      enableNATTraversal: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    },
+  );
+});
+
+test("buildNetworkConfig returns relay-node config", () => {
+  assert.deepEqual(
+    buildNetworkConfig("relay-node", {
+      relayNode: {
+        listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+        announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+      },
+    }),
+    {
+      discovery: "bootstrap",
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+      enableNATTraversal: true,
+      enableCircuitRelayServer: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    },
+  );
 });
 
 test("planInboundTargetSync preserves existing targets and reports missing channels", () => {

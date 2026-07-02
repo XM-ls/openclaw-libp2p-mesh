@@ -31,7 +31,6 @@ export type SetupPromptChoice =
   | "lan"
   | "cross-network"
   | "relay-node"
-  | "tools-only"
   | "add-targets"
   | "sync-from-channels"
   | "disable-inbound"
@@ -292,11 +291,10 @@ function hasLegacyOnlyInboundConfig(pluginConfig: MeshConfig): boolean {
 }
 
 async function selectSetupMode(prompter: SetupPrompter): Promise<SetupMode> {
-  return prompter.select("Choose setup mode:", [
-    { label: "LAN: same WiFi / local network", value: "lan" },
-    { label: "Cross-network: use bootstrap/relay", value: "cross-network" },
-    { label: "Relay node: this machine has a public address", value: "relay-node" },
-    { label: "Tools only: no inbound delivery", value: "tools-only" },
+  return prompter.select("Choose network setup:", [
+    { label: "Use default LAN discovery", value: "lan" },
+    { label: "Add bootstrap / relay addresses for cross-network use", value: "cross-network" },
+    { label: "Configure this machine as a public relay node", value: "relay-node" },
   ]);
 }
 
@@ -306,13 +304,17 @@ async function buildNetworkConfigFromPrompts(mode: SetupMode, prompter: SetupPro
       return buildNetworkConfig("cross-network", {
         crossNetwork: {
           bootstrapList: await promptForAddressList(prompter, "Bootstrap multiaddr", "Add another bootstrap?"),
-          relayList: await promptForOptionalAddressList(prompter, "Relay multiaddr", "Add another relay?"),
+          relayList: await promptForOptionalAddressList(
+            prompter,
+            "Relay multiaddr (optional, leave empty to skip)",
+            "Add another relay?",
+          ),
         },
       });
     case "relay-node":
       return buildNetworkConfig("relay-node", {
         relayNode: {
-          listenAddrs: [await prompter.input("Listen address", { required: true })],
+          listenAddrs: [await prompter.input("Listen address", { defaultValue: "/ip4/0.0.0.0/tcp/4001", required: true })],
           announceAddrs: [await prompter.input("Public announce address", { required: true })],
         },
       });

@@ -240,3 +240,55 @@ test("runSetupWizard preserves existing inbound targets when all sync inputs are
   assert.match(output, /telegram/);
   assert.match(output, /qqbot/);
 });
+
+test("runSetupWizard existing config network setup choices exclude tools-only", async () => {
+  const selections = ["network-mode", "lan", "preview-apply"];
+  let sawNetworkSetupPrompt = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+
+        if (message === "Choose network setup:") {
+          sawNetworkSetupPrompt = true;
+          assert.deepEqual(
+            choices.map((choice) => choice.value),
+            ["lan", "cross-network", "relay-node"],
+          );
+          assert.equal(choices.some((choice) => choice.value === "tools-only"), false);
+        }
+
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input() {
+        assert.fail("LAN network setup should not prompt for input");
+      },
+      print() {},
+    },
+    writer: {
+      async write() {},
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sawNetworkSetupPrompt, true);
+});
