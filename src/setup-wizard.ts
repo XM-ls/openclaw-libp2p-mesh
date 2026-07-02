@@ -359,7 +359,11 @@ async function promptForOptionalAddressList(
   }
   const addresses = [firstAddress];
   while (await prompter.confirm(addAnotherMessage, false)) {
-    addresses.push((await prompter.input(message, { required: true })).trim());
+    let nextAddress = "";
+    while (!nextAddress) {
+      nextAddress = (await prompter.input(message, { required: true })).trim();
+    }
+    addresses.push(nextAddress);
   }
   return addresses;
 }

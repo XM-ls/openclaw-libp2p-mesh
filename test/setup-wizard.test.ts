@@ -553,6 +553,70 @@ test("runSetupWizard treats whitespace network entry inputs as empty and trims r
   assert.deepEqual(pluginConfig.relayList, ["/ip4/8.8.8.8/tcp/4001/p2p/12D3TrimmedRelay"]);
 });
 
+test("runSetupWizard reprompts for blank follow-up network entry addresses", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = [
+    " /ip4/9.9.9.9/tcp/4001/p2p/12D3FirstBootstrap ",
+    "   ",
+    " /ip4/9.9.9.10/tcp/4001/p2p/12D3SecondBootstrap ",
+    "",
+  ];
+  const addAnotherResponses = [true, false];
+  const expectedRequired = [false, true, true, false];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3OldBootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another bootstrap?") {
+          return addAnotherResponses.shift() ?? false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, expectedRequired.shift());
+        const value = inputs.shift() ?? "";
+        return value;
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, [
+    "/ip4/9.9.9.9/tcp/4001/p2p/12D3FirstBootstrap",
+    "/ip4/9.9.9.10/tcp/4001/p2p/12D3SecondBootstrap",
+  ]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"]);
+});
+
 test("runSetupWizard replaces network entry addresses when new values are entered", async () => {
   const selections = ["network-entry-addresses"];
   const inputs = [
