@@ -126,9 +126,9 @@ function formatInstanceList(rows: ListInstanceRow[]): string {
     }
 
     if (entry.localLabels.length === 0) {
-      lines.push("   localLabels: none (local private labels; not broadcast)");
+      lines.push("   localLabels: none");
     } else {
-      lines.push("   localLabels (local private labels; not broadcast):");
+      lines.push("   localLabels:");
       for (const label of entry.localLabels) {
         lines.push(...formatLocalLabel(label));
       }
@@ -445,21 +445,14 @@ export function buildP2PTools(
           const instances = await router.listInstances();
           const connected = new Set(mesh.getConnectedPeers());
           const rows = await Promise.all(
-            instances.map(async (entry): Promise<ListInstanceRow> => {
-              const localLabels =
-                entry.localLabels !== undefined
-                  ? entry.localLabels
-                  : options.peerLabelStore
-                    ? await options.peerLabelStore.listLabels(entry.instanceId)
-                    : [];
-
-              return {
-                ...entry,
-                userPublicAttributes: entry.userPublicAttributes ?? [],
-                connected: connected.has(entry.peerId),
-                localLabels,
-              };
-            }),
+            instances.map(async (entry): Promise<ListInstanceRow> => ({
+              ...entry,
+              userPublicAttributes: entry.userPublicAttributes ?? [],
+              connected: connected.has(entry.peerId),
+              localLabels: options.peerLabelStore
+                ? await options.peerLabelStore.listLabels(entry.instanceId)
+                : [],
+            })),
           );
           const text = formatInstanceList(rows);
           return {

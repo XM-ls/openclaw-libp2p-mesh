@@ -1,61 +1,126 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import {
+  LIBP2P_MESH_PROMPT_END,
+  LIBP2P_MESH_PROMPT_START,
+  autoInstallAgentPrompt,
+  installAgentPromptFile,
+} from "../src/prompt-config.js";
 
-import { LIBP2P_MESH_AGENT_PROMPT } from "../src/prompt-config.js";
+async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(path.join(tmpdir(), "libp2p-mesh-prompt-"));
+  try {
+    return await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
-test("agent prompt documents local peer labels command and scope rules", () => {
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /openclaw libp2p-mesh labels/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /local labels for remote instances/i);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /peer-labels\.json/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="public"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="local"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /default is scope="public"/i);
+test("installAgentPromptFile creates AGENTS.md with managed block", async () => {
+  await withTempDir(async (dir) => {
+    const agentsPath = path.join(dir, "workspace", "AGENTS.md");
+    const result = await installAgentPromptFile(agentsPath);
+    const content = await readFile(agentsPath, "utf8");
+
+    assert.equal(result.existed, false);
+    assert.equal(result.path, agentsPath);
+    assert.match(content, new RegExp(LIBP2P_MESH_PROMPT_START));
+    assert.match(content, new RegExp(LIBP2P_MESH_PROMPT_END));
+    assert.match(content, /p2p_send_instance_message/);
+  });
 });
 
-test("agent prompt maps user wording to scope choices", () => {
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /我归类/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /我标记/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /labels/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="local"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /public/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /自己公开/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="public"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /both/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /two sources/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /公开和本地都算.*scope="all"/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /scope="all"/);
+test("installAgentPromptFile replaces only the managed block", async () => {
+  await withTempDir(async (dir) => {
+    const agentsPath = path.join(dir, "AGENTS.md");
+    await writeFile(
+      agentsPath,
+      [
+        "# User rules",
+        "",
+        "keep this line",
+        LIBP2P_MESH_PROMPT_START,
+        "old prompt",
+        LIBP2P_MESH_PROMPT_END,
+        "",
+        "keep this tail",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await installAgentPromptFile(agentsPath);
+    const content = await readFile(agentsPath, "utf8");
+
+    assert.equal(result.existed, true);
+    assert.match(content, /keep this line/);
+    assert.match(content, /keep this tail/);
+    assert.doesNotMatch(content, /old prompt/);
+    assert.match(content, /p2p_send_instance_message/);
+  });
 });
 
-test("libp2p prompt explains localLabels snapshot privacy", () => {
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /instance-peer\.json/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*私有.*快照/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not remote public attributes/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not produced by remote USER\.md\/profile/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*not be sent to, shown to, or notified to the labeled user/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*不会.*instance-announce/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /本地标签.*scope="local"/s);
+test("autoInstallAgentPrompt logs install and update results", async () => {
+  const infos: string[] = [];
+  await autoInstallAgentPrompt({
+    install: async () => ({ existed: false, path: "/tmp/AGENTS.md" }),
+    logger: { info: (message) => infos.push(message) },
+  });
+  await autoInstallAgentPrompt({
+    install: async () => ({ existed: true, path: "/tmp/AGENTS.md" }),
+    logger: { info: (message) => infos.push(message) },
+  });
+
+  assert.deepEqual(infos, [
+    "[libp2p-mesh] Installed AGENTS.md prompt block automatically.",
+    "[libp2p-mesh] Updated AGENTS.md prompt block automatically.",
+  ]);
 });
 
-test("agent prompt separates public attributes from local labels during troubleshooting", () => {
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /userPublicAttributes.*远端公开广播的用户属性/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /localLabels.*本机私有本地标签快照/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /不要把 `localLabels` 说成远端公开属性/s);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /不要把 `userPublicAttributes` 和 `localLabels` 混为一类/s);
+test("autoInstallAgentPrompt logs warning and does not throw on install failure", async () => {
+  const warnings: string[] = [];
+  await autoInstallAgentPrompt({
+    install: async () => {
+      throw new Error("disk full");
+    },
+    logger: { warn: (message) => warnings.push(message) },
+  });
+
+  assert.deepEqual(warnings, [
+    "[libp2p-mesh] Failed to install AGENTS.md prompt automatically: disk full",
+  ]);
 });
 
-test("agent prompt documents async USER.md public attributes", () => {
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /source="USER\.md"/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /异步/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /OpenClaw.*agent\/API 模型/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /省略 `userPublicAttributes`/);
-  assert.match(LIBP2P_MESH_AGENT_PROMPT, /普通对话 agent 不应自己读取 USER\.md/);
+test("autoInstallAgentPrompt ignores throwing info logger after successful install", async () => {
+  const warnings: string[] = [];
+  await assert.doesNotReject(
+    autoInstallAgentPrompt({
+      install: async () => ({ existed: false, path: "/tmp/AGENTS.md" }),
+      logger: {
+        info: () => {
+          throw new Error("logger unavailable");
+        },
+        warn: (message) => warnings.push(message),
+      },
+    }),
+  );
+
+  assert.deepEqual(warnings, []);
 });
 
-test("agent prompt requires dry run and send to keep selector scope and message identical", () => {
-  assert.match(
-    LIBP2P_MESH_AGENT_PROMPT,
-    /dry run[\s\S]*actual send[\s\S]*same selector\/scope\/message/i,
+test("autoInstallAgentPrompt ignores throwing warn logger after install failure", async () => {
+  await assert.doesNotReject(
+    autoInstallAgentPrompt({
+      install: async () => {
+        throw new Error("disk full");
+      },
+      logger: {
+        warn: () => {
+          throw new Error("logger unavailable");
+        },
+      },
+    }),
   );
 });

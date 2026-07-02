@@ -7,7 +7,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 - **LAN Discovery** — Auto-discovers peers on the same local network via mDNS (Bonjour/Avahi)
 - **Direct Messaging** — Send messages directly to another peer by its Peer ID
 - **Broadcast** — Publish messages to a shared topic, flood-fill forwarded across the mesh
-- **Bootstrap Mode** — Optional static bootstrap peer list for non-LAN scenarios
+- **Bootstrap Entries** — Optional static bootstrap peer list for non-LAN scenarios
 - **WebSocket Transport** — Optional WebSocket support for NAT/firewall-friendly connections
 - **NAT Traversal** — Built-in AutoNAT + UPnP + Circuit Relay v2 + DCUtR for peers behind home routers / firewalls
 - **User Public Attributes** — Announce public tags and structured profile attributes so agents can dry-run and send to locally discovered instances by attribute
@@ -23,7 +23,7 @@ P2P mesh network plugin for OpenClaw. Enables direct peer-to-peer communication 
 ### Method 1: Via OpenClaw CLI (Recommended)
 
 ```bash
-openclaw install libp2p-mesh
+openclaw plugins install libp2p-mesh
 ```
 
 ### Method 2: Manual (npm)
@@ -43,21 +43,24 @@ openclaw plugins registry --refresh
 
 The published npm package includes compiled JavaScript under `dist/`, so OpenClaw and acpx can load it directly.
 
-Then run the setup wizard:
+## Automatic setup
 
-```bash
-openclaw libp2p-mesh setup
-```
+After installation, `libp2p-mesh` automatically:
 
-The wizard creates or edits `plugins.entries["libp2p-mesh"].config` in your OpenClaw config file. You do not need to manually edit `openclaw.json`.
+- installs or updates its managed prompt block in `~/.openclaw/workspace/AGENTS.md`;
+- uses default network settings for mDNS discovery, NAT traversal, DHT, and delivery ACK timeout when those fields are not explicitly configured.
 
-After the wizard writes changes, restart the gateway:
+You no longer need to run `openclaw libp2p-mesh prompt install` or `openclaw libp2p-mesh setup` for the default setup path.
+Restart the gateway after installing or updating the plugin:
 
 ```bash
 openclaw gateway restart
 ```
 
-The generated config shape is:
+Use `openclaw libp2p-mesh setup` only when you need advanced network settings such as bootstrap nodes, relay nodes, or public announce addresses.
+Use `openclaw libp2p-mesh prompt install` only as a manual repair command if the managed AGENTS.md block was removed.
+
+The default generated config shape is:
 
 ```json
 {
@@ -66,7 +69,6 @@ The generated config shape is:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "deliveryAckTimeoutMs": 15000
         }
       }
@@ -77,9 +79,9 @@ The generated config shape is:
 
 ## 安装后配置流程
 
-推荐用户安装插件后按下面顺序配置。所有配置都通过 CLI 完成，不需要手动打开 `openclaw.json`。
+默认安装路径会自动完成基础配置，不需要手动打开 `openclaw.json`。
 
-### 1. 安装或更新插件
+### 1. 安装或更新插件后重启 gateway
 
 ```bash
 openclaw plugins update libp2p-mesh@latest
@@ -88,27 +90,39 @@ openclaw plugins update libp2p-mesh@latest
 如果是首次安装，也可以使用：
 
 ```bash
-openclaw install libp2p-mesh
+openclaw plugins install libp2p-mesh
 ```
 
-### 2. 运行网络和入站目标配置向导
+安装或更新后，插件会自动安装或更新 `~/.openclaw/workspace/AGENTS.md` 中由 `libp2p-mesh` 管理的提示词区块，并在未显式配置时使用 mDNS、NAT traversal、DHT 和 delivery ACK timeout 的默认网络设置。
+
+```bash
+openclaw gateway restart
+```
+
+### 2. 高级网络或入站目标配置
+
+只有需要高级网络设置或入站投递目标时才运行配置向导：
 
 ```bash
 openclaw libp2p-mesh setup
 ```
 
-这个向导会写入：
+这个向导会写入 `plugins.entries["libp2p-mesh"].config`，不会写入 `channels["libp2p-mesh"]`。
 
-```text
-plugins.entries["libp2p-mesh"].config
-```
+向导会把网络配置和入站投递分开处理。网络配置只决定当前节点如何发现或连接其他节点：
 
-不会写入 `channels["libp2p-mesh"]`。常见选择：
+- 使用默认局域网发现。
+- 添加 bootstrap / relay 地址用于跨网络连接。
+- 将当前机器配置为公网 relay 节点。
 
-- 同一局域网测试：选择 LAN / mDNS。
-- 跨网络或需要 relay：选择 bootstrap / relay 相关模式。
-- 需要把收到的 P2P 消息投递到飞书、QQ、Telegram 等 channel：配置 `inboundTargets`。
-- 暂时只需要工具能力、不接收消息：选择禁用入站投递，写入 `inboundTargets: []`。
+入站投递配置决定收到 P2P 消息后显示到哪里：
+
+- 从现有 channels 同步。
+- 手动添加一个 target。
+- 不把 P2P 消息投递到本地 channel。
+- 暂时保持不变。
+
+从现有 channels 同步时，某个 channel 的 target 可以直接留空，表示跳过该 channel。
 
 入站目标示例：
 
@@ -132,19 +146,15 @@ QQ 单聊示例：
 
 其中 `<senderId>` 可以从 QQ channel 日志里的 `senderId` 取得。
 
-### 3. 一键安装固定 Agent 提示词
+### 3. 手动修复 Agent 提示词
+
+默认安装路径会自动维护提示词区块。只有这个区块被手动删除或需要修复时，才运行：
 
 ```bash
 openclaw libp2p-mesh prompt install
 ```
 
-该命令会把内置的 P2P 中继助手规则写入：
-
-```text
-~/.openclaw/workspace/AGENTS.md
-```
-
-它不会覆盖整个文件，只维护下面两个 marker 之间的区块：
+该命令不会覆盖整个 `~/.openclaw/workspace/AGENTS.md` 文件，只维护下面两个 marker 之间的区块：
 
 ```md
 <!-- libp2p-mesh:prompt:start -->
@@ -207,7 +217,7 @@ Labels are private local notes for remote instances you have already discovered.
 
 ### 7. 重启或启动 gateway
 
-完成 `setup` 或 `prompt install` 后，重启 gateway 让配置和提示词生效：
+安装、更新或手动修改配置后，重启 gateway 让配置和提示词生效：
 
 ```bash
 openclaw gateway restart
@@ -232,13 +242,15 @@ openclaw gateway
 
 ## Configuration
 
-Use the interactive setup command for first-time configuration and later edits:
+The default setup path needs no manual configuration. When `plugins.entries["libp2p-mesh"].config` omits network fields, the plugin uses mDNS discovery, NAT traversal, DHT, and the default delivery ACK timeout automatically.
+
+Use the interactive setup command for advanced network settings and later edits:
 
 ```bash
 openclaw libp2p-mesh setup
 ```
 
-On first run, the wizard enables the plugin and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. It can update the network mode, add or remove inbound delivery targets, preview the final JSON, and only writes after you confirm.
+The wizard enables the plugin when needed and writes `plugins.entries["libp2p-mesh"].config`. On later runs, it edits the existing `libp2p-mesh` entry instead of replacing it blindly. Network discovery is automatic: mDNS, DHT, NAT traversal, relay transport, and hole punching are enabled by default. Network setup only adds optional bootstrap/relay entry addresses or public relay-node parameters; inbound delivery chooses where received P2P messages should appear. After each edit action, the wizard previews the final JSON and only writes after you confirm. When syncing from existing channels, leave a target empty to skip that channel.
 
 The wizard uses OpenClaw's config writer, so the actual file is your normal OpenClaw config path, usually `~/.openclaw/openclaw.json`. You do not need to manually edit `openclaw.json`, and the wizard does not create `channels["libp2p-mesh"]`.
 
@@ -250,13 +262,7 @@ openclaw gateway restart
 
 ### Minimal LAN Setup (Default)
 
-Run:
-
-```bash
-openclaw libp2p-mesh setup
-```
-
-Choose LAN mode for two computers on the same WiFi or Ethernet segment. The wizard writes:
+For two computers on the same WiFi or Ethernet segment, no setup wizard is required. The plugin behaves as if the following defaults were present:
 
 ```json
 {
@@ -265,7 +271,6 @@ Choose LAN mode for two computers on the same WiFi or Ethernet segment. The wiza
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "deliveryAckTimeoutMs": 15000
         }
       }
@@ -274,7 +279,7 @@ Choose LAN mode for two computers on the same WiFi or Ethernet segment. The wiza
 }
 ```
 
-This is sufficient for two computers on the same WiFi to discover each other.
+This is sufficient for two computers on the same WiFi to discover each other. The runtime still enables mDNS and DHT automatically even when these fields are not written to `openclaw.json`.
 
 ### With Static Port (Optional)
 
@@ -287,7 +292,6 @@ By default, the node picks a random TCP port. To use a fixed port:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
           "deliveryAckTimeoutMs": 15000
         }
@@ -299,7 +303,7 @@ By default, the node picks a random TCP port. To use a fixed port:
 
 ### With Bootstrap Nodes (Cross-Network)
 
-If peers are on different networks, run the setup wizard and choose cross-network mode. It prompts for bootstrap and optional relay multiaddrs, then writes:
+If peers are on different networks, run the setup wizard and add bootstrap and optional relay multiaddrs. These addresses are entry points; they do not replace LAN discovery or DHT. The address prompts can be left empty if you do not have an entry node yet.
 
 ```json
 {
@@ -308,7 +312,6 @@ If peers are on different networks, run the setup wizard and choose cross-networ
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "bootstrapList": [
             "/ip4/203.0.113.10/tcp/4001/p2p/12D3KooW..."
           ],
@@ -326,7 +329,7 @@ If peers are on different networks, run the setup wizard and choose cross-networ
 
 ### Multiple Inbound Targets
 
-Inbound delivery is owned by the receiving OpenClaw instance. In the setup wizard, choose to add one or more inbound delivery targets. The sender still sends to the receiver's peer ID or instance ID; the receiver decides which local channels display the incoming message.
+Inbound delivery is owned by the receiving OpenClaw instance. In the setup wizard, choose where received P2P messages should appear: sync from existing channels, add a target manually, disable local-channel delivery, or leave the current setting unchanged. When syncing from existing channels, leave a target empty to skip that channel. The sender still sends to the receiver's peer ID or instance ID; the receiver decides which local channels display the incoming message.
 
 Example wizard output with two targets:
 
@@ -337,7 +340,6 @@ Example wizard output with two targets:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -364,19 +366,21 @@ If `inboundTargets` is an empty array, inbound delivery is disabled. If `inbound
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `discovery` | `string` | `"mdns"` | Discovery mechanism: `"mdns"` (LAN), `"bootstrap"` (static list), `"dht"` (Kademlia peer discovery and pubkey registry) |
+| `discovery` | `string` | legacy-compatible | Legacy hint. New setup does not write this field; runtime composes discovery from mDNS, DHT, and optional entry lists. |
 | `listenAddrs` | `string[]` | `["/ip4/0.0.0.0/tcp/0"]` | libp2p listen multiaddrs |
-| `bootstrapList` | `string[]` | `[]` | Static bootstrap peer multiaddrs (when `discovery=bootstrap`) |
+| `bootstrapList` | `string[]` | `[]` | Optional static bootstrap peer multiaddrs. Non-empty values add bootstrap discovery without disabling mDNS or DHT. |
 | `enableWebSocket` | `boolean` | `false` | Enable WebSocket transport for browser/NAT compatibility |
 | `meshTopic` | `string` | `"openclaw-mesh"` | Default broadcast topic |
 | `enableAgentSync` | `boolean` | `true` | Enable agent state synchronization over the mesh |
 | `enableNATTraversal` | `boolean` | `true` | Master switch for identify + AutoNAT + UPnP + Circuit Relay v2 + DCUtR |
+| `enableMDNS` | `boolean` | `true` | Enable mDNS LAN peer discovery |
 | `enableIdentify` | `boolean` | `true` | libp2p identify protocol (required by AutoNAT and DCUtR) |
 | `enableAutoNAT` | `boolean` | `true` | AutoNAT — detect whether this node is publicly reachable |
 | `enableUPnP` | `boolean` | `true` | Attempt UPnP/PMP port mapping on the local gateway |
 | `enableCircuitRelay` | `boolean` | `true` | Dial peers via /p2p-circuit relay addresses |
 | `enableCircuitRelayServer` | `boolean` | `false` | Act as a Circuit Relay v2 server (only enable on a public node) |
 | `enableDCUtR` | `boolean` | `true` | Hole-punching: upgrade a relayed connection to a direct one |
+| `enableDHT` | `boolean` | `true` | Enable DHT for WAN peer discovery and the pubkey registry |
 | `relayList` | `string[]` | `[]` | Multiaddrs of relays to reserve a slot on |
 | `discoverRelays` | `number` | `0` | Auto-discover this many relays via content routing |
 | `announceAddrs` | `string[]` | `[]` | Extra multiaddrs to announce on top of auto-detected ones |
@@ -428,7 +432,6 @@ You need at least one relay node with a public IP. Set it in `relayList`:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "bootstrapList": [
             "/ip4/<RELAY-IP>/tcp/4001/p2p/<RELAY-PEER-ID>"
           ],
@@ -457,7 +460,6 @@ Add `enableCircuitRelayServer: true` to your config and announce the public addr
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "bootstrap",
           "listenAddrs": ["/ip4/0.0.0.0/tcp/4001"],
           "announceAddrs": ["/ip4/<PUBLIC-IP>/tcp/4001"],
           "enableNATTraversal": true,
@@ -543,13 +545,13 @@ $OPENCLAW_STATE_DIR/libp2p/instance-peer.json
 
 Users do not configure this file path. It is plugin-managed state.
 
-For inbound display, run the setup wizard on the receiving instance and add a target:
+For inbound display, run the setup wizard on the receiving instance and sync from configured channels:
 
 ```bash
 openclaw libp2p-mesh setup
 ```
 
-The wizard edits `plugins.entries["libp2p-mesh"].config` and can add, edit, remove, or disable inbound delivery targets. You do not need to manually edit `openclaw.json`.
+The wizard edits `plugins.entries["libp2p-mesh"].config` and can sync from configured channels, add, edit, remove, or disable inbound delivery targets. Existing `inboundTargets` are preserved during sync; newly added channels are only prompted once for their `target`. You do not need to manually edit `openclaw.json`.
 
 Example result for a single Feishu target:
 
@@ -560,7 +562,6 @@ Example result for a single Feishu target:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -588,7 +589,6 @@ The receiver chooses where inbound P2P messages appear:
       "libp2p-mesh": {
         "enabled": true,
         "config": {
-          "discovery": "mdns",
           "inboundTargets": [
             {
               "id": "feishu-main",
@@ -609,7 +609,7 @@ The receiver chooses where inbound P2P messages appear:
 }
 ```
 
-If `inboundTargets` is present, it is used instead of `inboundChannel`/`inboundTarget`.
+If `inboundTargets` is present, it is used instead of `inboundChannel`/`inboundTarget`. The sync action in the wizard only appends missing channels and does not delete or overwrite existing targets.
 The sender receives per-target delivery status in the tool result.
 
 The OpenClaw agent should prefer:
@@ -836,10 +836,9 @@ Privacy boundary: public attributes are broadcast with instance announce message
 3. **Check mDNS** — Ensure mDNS/Bonjour/Avahi is running:
    - macOS: built-in, should work
    - Linux: `sudo systemctl status avahi-daemon`
-4. **Use static port + manual IP** — If mDNS still fails, switch to bootstrap mode and use the LAN IP directly:
+4. **Use static port + manual IP** — If mDNS still fails, add the other node as a bootstrap entry by LAN IP:
    ```json
    {
-     "discovery": "bootstrap",
      "bootstrapList": [
        "/ip4/192.168.1.42/tcp/4001/p2p/<PEER-ID-OF-OTHER-MACHINE>"
      ]

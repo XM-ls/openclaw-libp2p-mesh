@@ -154,7 +154,6 @@ export interface InstancePeerRecord {
   multiaddrs: string[];
   pubkey?: string;
   userPublicAttributes?: UserPublicAttribute[];
-  localLabels?: LocalPeerLabelAttribute[];
   lastSeenAt: number;
   lastAnnouncedAt: number;
   source: "announce";
@@ -170,8 +169,6 @@ export interface InstancePeerStore {
   load(): Promise<InstancePeerTable>;
   list(): Promise<InstancePeerRecord[]>;
   resolve(instanceId: string): Promise<InstancePeerRecord | undefined>;
-  syncLocalLabels(labelsByInstance: Record<string, LocalPeerLabelAttribute[]>): Promise<InstancePeerTable>;
-  updateLocalLabels(instanceId: string, labels: LocalPeerLabelAttribute[]): Promise<InstancePeerRecord | undefined>;
   upsertFromAnnounce(payload: InstanceAnnouncePayload): Promise<{
     record: InstancePeerRecord;
     changed: boolean;
@@ -245,7 +242,6 @@ export type InstanceRouterOptions = {
     listAttributes(): Promise<UserPublicAttribute[]>;
   };
   peerLabelStore?: {
-    load?(): Promise<PeerLabelsFile>;
     listLabels(instanceId: string): Promise<LocalPeerLabelAttribute[]>;
   };
   publicAttributeRefreshInitiallyEnabled?: boolean;
@@ -291,7 +287,9 @@ export interface MeshConfig {
   enableWebSocket?: boolean;
   peerIdPath?: string;
   instanceName?: string;
-  /** Enable DHT for WAN peer discovery and pubkey registry (default: true when discovery=dht, false otherwise) */
+  /** Enable mDNS LAN peer discovery (default: true) */
+  enableMDNS?: boolean;
+  /** Enable DHT for WAN peer discovery and pubkey registry (default: true) */
   enableDHT?: boolean;
 
   // ---------------------------------------------------------------------

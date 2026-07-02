@@ -1,252 +1,179 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-
+import test from "node:test";
 import {
-  DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
-  addInboundTarget,
-  applyPluginConfig,
+  applyDefaultMeshConfig,
+  buildNetworkEntryConfig,
   buildNetworkConfig,
-  disableInboundDelivery,
-  generateInboundTargetId,
-  getLibp2pMeshConfig,
-  listConfiguredChannels,
-  mergeNetworkConfig,
-  migrateLegacyInboundConfig,
-  removeInboundTarget,
-  setInboundTargets,
-  type OpenClawConfigLike,
+  buildPublicRelayNodeConfig,
+  DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  planInboundTargetSync,
 } from "../src/setup-config.js";
 
-test("applyPluginConfig creates plugins entry without writing channels entry", () => {
-  const config: OpenClawConfigLike = {
-    channels: {
-      feishu: { enabled: true },
+test("applyDefaultMeshConfig returns automatic network defaults for missing config", () => {
+  assert.deepEqual(applyDefaultMeshConfig(undefined), {
+    discovery: "mdns",
+    enableNATTraversal: true,
+    enableDHT: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
+});
+
+test("applyDefaultMeshConfig preserves explicit user network fields", () => {
+  assert.deepEqual(
+    applyDefaultMeshConfig({
+      discovery: "bootstrap",
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Example"],
+      enableDHT: false,
+      enableNATTraversal: false,
+      deliveryAckTimeoutMs: 30000,
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+    }),
+    {
+      discovery: "bootstrap",
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Example"],
+      enableDHT: false,
+      enableNATTraversal: false,
+      deliveryAckTimeoutMs: 30000,
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
     },
-  };
+  );
+});
 
-  const next = applyPluginConfig(config, buildNetworkConfig("lan"));
+test("applyDefaultMeshConfig preserves inbound delivery configuration", () => {
+  assert.deepEqual(
+    applyDefaultMeshConfig({
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+      inboundChannel: "telegram",
+      inboundTarget: "chat:123",
+    }),
+    {
+      discovery: "mdns",
+      enableNATTraversal: true,
+      enableDHT: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+      inboundChannel: "telegram",
+      inboundTarget: "chat:123",
+    },
+  );
+});
 
-  assert.equal(next.plugins?.entries?.["libp2p-mesh"]?.enabled, true);
-  assert.deepEqual(next.plugins?.entries?.["libp2p-mesh"]?.config, {
+test("applyDefaultMeshConfig treats non-object config as missing config", () => {
+  assert.deepEqual(applyDefaultMeshConfig("bad" as never), {
+    discovery: "mdns",
+    enableNATTraversal: true,
+    enableDHT: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
+});
+
+test("buildNetworkConfig returns LAN discovery config", () => {
+  assert.deepEqual(buildNetworkConfig("lan"), {
     discovery: "mdns",
     deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
   });
-  assert.equal(next.channels?.["libp2p-mesh"], undefined);
-  assert.deepEqual(next.channels?.feishu, { enabled: true });
 });
 
-test("buildNetworkConfig supports lan tools-only cross-network and relay-node modes", () => {
-  assert.deepEqual(buildNetworkConfig("lan"), {
-    discovery: "mdns",
-    deliveryAckTimeoutMs: 15000,
+test("buildNetworkEntryConfig omits empty bootstrap and relay lists", () => {
+  assert.deepEqual(buildNetworkEntryConfig({ bootstrapList: [], relayList: [] }), {
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
   });
+});
 
-  assert.deepEqual(buildNetworkConfig("tools-only"), {
-    discovery: "mdns",
-    inboundTargets: [],
-    deliveryAckTimeoutMs: 15000,
-  });
-
+test("buildNetworkEntryConfig writes provided entry address lists without discovery mode", () => {
   assert.deepEqual(
-    buildNetworkConfig("cross-network", {
-      crossNetwork: {
-        bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3bootstrap"],
-        relayList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3relay"],
-      },
+    buildNetworkEntryConfig({
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
     }),
     {
-      discovery: "bootstrap",
-      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3bootstrap"],
-      relayList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3relay"],
-      enableNATTraversal: true,
-      deliveryAckTimeoutMs: 15000,
+      bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+      relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
     },
   );
+});
 
+test("buildPublicRelayNodeConfig enables relay server with optional announce address", () => {
   assert.deepEqual(
-    buildNetworkConfig("relay-node", {
-      relayNode: {
-        listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
-        announceAddrs: ["/ip4/203.0.113.10/tcp/4001"],
-      },
-    }),
-    {
-      discovery: "bootstrap",
+    buildPublicRelayNodeConfig({
+      enabled: true,
       listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
-      announceAddrs: ["/ip4/203.0.113.10/tcp/4001"],
-      enableNATTraversal: true,
+      announceAddrs: [],
+    }),
+    {
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
       enableCircuitRelayServer: true,
-      deliveryAckTimeoutMs: 15000,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
     },
   );
 });
 
-test("mergeNetworkConfig replaces network fields while preserving inbound targets", () => {
-  const existing = {
-    discovery: "bootstrap" as const,
-    bootstrapList: ["/ip4/old/tcp/4001/p2p/old"],
-    relayList: ["/ip4/relay/tcp/4001/p2p/relay"],
-    listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
-    announceAddrs: ["/ip4/203.0.113.10/tcp/4001"],
-    enableNATTraversal: true,
-    enableCircuitRelayServer: true,
-    inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-    deliveryAckTimeoutMs: 9000,
-  };
-
-  assert.deepEqual(mergeNetworkConfig(existing, buildNetworkConfig("lan")), {
-    discovery: "mdns",
-    inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("getLibp2pMeshConfig reads plugin entry config", () => {
-  const config: OpenClawConfigLike = {
-    plugins: {
-      entries: {
-        "libp2p-mesh": {
-          enabled: true,
-          config: {
-            discovery: "mdns",
-            deliveryAckTimeoutMs: 15000,
-          },
-        },
-      },
-    },
-  };
-
-  assert.deepEqual(getLibp2pMeshConfig(config), {
-    discovery: "mdns",
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("listConfiguredChannels returns configured channels with manual fallback handled by wizard", () => {
+test("buildPublicRelayNodeConfig includes provided announce addresses", () => {
   assert.deepEqual(
-    listConfiguredChannels({
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-        "libp2p-mesh": { enabled: true },
-      },
+    buildPublicRelayNodeConfig({
+      enabled: true,
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
     }),
-    ["feishu", "telegram"],
+    {
+      listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+      announceAddrs: ["/ip4/9.9.9.9/tcp/4001"],
+      enableCircuitRelayServer: true,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    },
   );
 });
 
-test("generateInboundTargetId uses channel-main then channel indexes", () => {
-  const existing = [
-    { id: "feishu-main", channel: "feishu", target: "user:ou_1" },
-    { id: "telegram-main", channel: "telegram", target: "chat:1" },
-    { id: "feishu-2", channel: "feishu", target: "chat:2" },
-  ];
-
-  assert.equal(generateInboundTargetId("feishu", existing), "feishu-3");
-  assert.equal(generateInboundTargetId("telegram", existing), "telegram-2");
-  assert.equal(generateInboundTargetId("slack", existing), "slack-main");
+test("buildPublicRelayNodeConfig disables relay server without touching entry addresses", () => {
+  assert.deepEqual(buildPublicRelayNodeConfig({ enabled: false }), {
+    enableCircuitRelayServer: false,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
 });
 
-test("addInboundTarget adds generated id and rejects duplicate channel target", () => {
-  const first = addInboundTarget([], { channel: "feishu", target: "user:ou_xxx" });
-  assert.equal(first.ok, true);
-  assert.deepEqual(first.ok ? first.added : undefined, {
-    id: "feishu-main",
-    channel: "feishu",
-    target: "user:ou_xxx",
-  });
+test("planInboundTargetSync preserves existing targets and reports missing channels", () => {
+  const result = planInboundTargetSync(
+    [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+    ["feishu", "telegram", "qqbot"],
+  );
 
-  const duplicate = addInboundTarget(first.ok ? first.targets : [], {
-    channel: "feishu",
-    target: "user:ou_xxx",
-  });
-  assert.equal(duplicate.ok, false);
-  assert.equal(duplicate.ok ? undefined : duplicate.error, "inbound target already exists: feishu / user:ou_xxx");
-  assert.deepEqual(duplicate.targets, first.ok ? first.targets : []);
-});
-
-test("removeInboundTarget removes by id without mutating other targets", () => {
-  const targets = [
+  assert.deepEqual(result.targets, [
     { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-    { id: "telegram-main", channel: "telegram", target: "chat:123" },
-  ];
-
-  assert.deepEqual(removeInboundTarget(targets, "feishu-main"), [
-    { id: "telegram-main", channel: "telegram", target: "chat:123" },
   ]);
+  assert.deepEqual(result.missingChannels, ["telegram", "qqbot"]);
 });
 
-test("setInboundTargets supports disable and skip semantics", () => {
-  assert.deepEqual(disableInboundDelivery({ discovery: "mdns" }), {
-    discovery: "mdns",
-    inboundTargets: [],
-  });
-
-  assert.deepEqual(setInboundTargets({ discovery: "mdns" }, undefined), {
-    discovery: "mdns",
-  });
-
-  assert.deepEqual(
-    setInboundTargets({ discovery: "mdns" }, [
-      { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-    ]),
-    {
-      discovery: "mdns",
-      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-    },
+test("planInboundTargetSync preserves multiple same-channel targets and ignores exact duplicates", () => {
+  const result = planInboundTargetSync(
+    [
+      { id: "feishu-main", channel: " feishu ", target: " user:ou_xxx " },
+      { id: "feishu-duplicate", channel: "feishu", target: "user:ou_xxx" },
+      { id: "feishu-backup", channel: "feishu", target: "user:ou_backup" },
+      { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+    ],
+    ["libp2p-mesh", "feishu", "telegram"],
   );
+
+  assert.deepEqual(result.targets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+    { id: "feishu-backup", channel: "feishu", target: "user:ou_backup" },
+    { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+  ]);
+  assert.deepEqual(result.missingChannels, []);
 });
 
-test("setInboundTargets clears legacy inbound fields when writing new targets", () => {
-  assert.deepEqual(
-    setInboundTargets(
-      {
-        discovery: "mdns",
-        inboundChannel: "feishu",
-        inboundTarget: "user:legacy",
-      },
-      [{ id: "telegram-main", channel: "telegram", target: "chat:123" }],
-    ),
-    {
-      discovery: "mdns",
-      inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123" }],
-    },
+test("planInboundTargetSync reports channels with only invalid existing targets as missing", () => {
+  const result = planInboundTargetSync(
+    [
+      { id: "feishu-blank-target", channel: "feishu", target: " " },
+      { id: "blank-channel", channel: " ", target: "user:ou_xxx" },
+    ],
+    ["feishu"],
   );
 
-  assert.deepEqual(
-    disableInboundDelivery({
-      discovery: "mdns",
-      inboundChannel: "feishu",
-      inboundTarget: "user:legacy",
-    }),
-    {
-      discovery: "mdns",
-      inboundTargets: [],
-    },
-  );
-});
-
-test("migrateLegacyInboundConfig converts keeps or replaces legacy fields", () => {
-  const legacy = {
-    discovery: "mdns" as const,
-    inboundChannel: "feishu",
-    inboundTarget: "user:ou_xxx",
-  };
-
-  assert.deepEqual(migrateLegacyInboundConfig(legacy, "convert"), {
-    discovery: "mdns",
-    inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-  });
-
-  assert.deepEqual(migrateLegacyInboundConfig(legacy, "keep"), legacy);
-
-  assert.deepEqual(
-    migrateLegacyInboundConfig(legacy, "replace", [
-      { id: "telegram-main", channel: "telegram", target: "chat:123" },
-    ]),
-    {
-      discovery: "mdns",
-      inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123" }],
-    },
-  );
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.missingChannels, ["feishu"]);
 });

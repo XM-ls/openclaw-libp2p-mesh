@@ -1,0 +1,644 @@
+function targetLabel(result) {
+    const name = result.id ?? `${result.channel}:${result.target}`;
+    return `${name} (${result.channel} / ${result.target})`;
+}
+function formatDeliveryResults(instanceId, delivered, results) {
+    const heading = delivered
+        ? `发往 ${instanceId} 的消息投递结果`
+        : `发往 ${instanceId} 的消息投递失败`;
+    const lines = results.map((result) => {
+        const status = result.ok ? "已送达" : `失败：${result.error ?? "unknown error"}`;
+        return `${targetLabel(result)}：${status}`;
+    });
+    return [heading, ...lines].join("\n");
+}
+function attributeLabel(attribute) {
+    if (attribute.kind === "tag") {
+        return `tag:${attribute.value}`;
+    }
+    return `${attribute.key}:${attribute.value}`;
+}
+function instanceTargetLabel(target) {
+    const name = target.instanceName ? ` (${target.instanceName})` : "";
+    return `${target.instanceId}${name} -> ${target.peerId}`;
+}
+function formatUserAttributeTargets(targets) {
+    return targets.map((target) => `${instanceTargetLabel(target)} [${target.matchSource}:${attributeLabel(target.matchedAttribute)}]`);
+}
+function formatUserAttributeResults(results) {
+    return results.map((result) => {
+        let status = "已送达";
+        if (!result.sent) {
+            status = `发送失败：${result.error ?? "unknown error"}`;
+        }
+        else if (!result.delivered) {
+            status = `投递失败：${result.error ?? "unknown error"}`;
+        }
+        return `${instanceTargetLabel(result)}：${status}`;
+    });
+}
+function formatPublicAttribute(attribute) {
+    if (attribute.kind === "tag") {
+        return [
+            "     - kind: tag",
+            `       value: ${attribute.value}`,
+            `       label: ${attribute.label}`,
+            `       source: ${attribute.source}`,
+        ];
+    }
+    return [
+        "     - kind: structured",
+        `       key: ${attribute.key}`,
+        `       value: ${attribute.value}`,
+        `       label: ${attribute.label}`,
+        `       source: ${attribute.source}`,
+    ];
+}
+function formatLocalLabel(label) {
+    return [
+        "     - kind: structured",
+        `       key: ${label.key}`,
+        `       value: ${label.value}`,
+        `       label: ${label.label}`,
+        `       source: ${label.source}`,
+    ];
+}
+function formatInstanceList(rows) {
+    if (rows.length === 0) {
+        return "No OpenClaw instances discovered yet.";
+    }
+    const lines = [`Discovered OpenClaw instances: ${rows.length}`];
+    rows.forEach((entry, index) => {
+        lines.push("", `${index + 1}. ${entry.instanceId}`, `   peerId: ${entry.peerId}`, `   instanceName: ${entry.instanceName ?? "(none)"}`, `   connected: ${entry.connected}`);
+        if ((entry.userPublicAttributes ?? []).length === 0) {
+            lines.push("   userPublicAttributes: none");
+        }
+        else {
+            lines.push("   userPublicAttributes:");
+            for (const attribute of entry.userPublicAttributes ?? []) {
+                lines.push(...formatPublicAttribute(attribute));
+            }
+        }
+        if (entry.localLabels.length === 0) {
+            lines.push("   localLabels: none");
+        }
+        else {
+            lines.push("   localLabels:");
+            for (const label of entry.localLabels) {
+                lines.push(...formatLocalLabel(label));
+            }
+        }
+    });
+    return lines.join("\n");
+}
+function normalizeUserAttributeScope(scope) {
+    if (scope === undefined) {
+        return undefined;
+    }
+    if (scope === "public" || scope === "local" || scope === "all") {
+        return scope;
+    }
+    return undefined;
+}
+function validateUserAttributeScope(scope) {
+    if (scope === undefined ||
+        scope === "public" ||
+        scope === "local" ||
+        scope === "all") {
+        return undefined;
+    }
+    return 'scope must be "public", "local", or "all".';
+}
+function normalizeUserAttributeSelector(selector) {
+    const value = typeof selector === "string" ? selector.trim() : "";
+    if (!value) {
+        return "selector is required.";
+    }
+    if (value.startsWith("#")) {
+        const tagValue = value.slice(1).trim();
+        return tagValue ? { kind: "tag", value: tagValue } : "selector tag value is required.";
+    }
+    const tagMatch = /^tag\s*:\s*(.+)$/i.exec(value);
+    if (tagMatch) {
+        const tagValue = tagMatch[1].trim();
+        return tagValue ? { kind: "tag", value: tagValue } : "selector tag value is required.";
+    }
+    const structuredMatch = /^([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(.+)$/.exec(value);
+    if (structuredMatch) {
+        const key = structuredMatch[1].trim();
+        const attributeValue = structuredMatch[2].trim();
+        return key && attributeValue
+            ? { kind: "structured", key, value: attributeValue }
+            : "selector key and value are required.";
+    }
+    return `selector "${value}" is ambiguous. Use "group=${value}" for structured group matching or "tag:${value}" for USER.md tags.`;
+}
+function normalizeUserAttributeMatch(params) {
+    if (params.selector !== undefined) {
+        return normalizeUserAttributeSelector(params.selector);
+    }
+    const match = params.match;
+    if (!match || typeof match !== "object") {
+        return "selector is required.";
+    }
+    if (match.kind === "tag") {
+        const value = typeof match.value === "string" ? match.value.trim() : "";
+        return value ? { kind: "tag", value } : "match.value is required for tag matches.";
+    }
+    if (match.kind === "structured") {
+        const key = typeof match.key === "string" ? match.key.trim() : "";
+        const value = typeof match.value === "string" ? match.value.trim() : "";
+        return key && value
+            ? { kind: "structured", key, value }
+            : "match.key and match.value are required for structured matches.";
+    }
+    return 'match.kind must be "tag" or "structured".';
+}
+export function buildP2PTools(mesh, router, options = {}) {
+    return [
+        {
+            name: "p2p_send_message",
+            label: "P2P Send Message",
+            description: "Send a direct message to another agent via the P2P mesh network.",
+            parameters: {
+                type: "object",
+                properties: {
+                    peerId: {
+                        type: "string",
+                        description: "Target peer ID (libp2p Peer ID string)",
+                    },
+                    message: {
+                        type: "string",
+                        description: "Message content to send",
+                    },
+                },
+                required: ["peerId", "message"],
+            },
+            async execute(_toolCallId, params) {
+                try {
+                    await mesh.sendToPeer(params.peerId, params.message);
+                    return {
+                        content: [{ type: "text", text: `Message sent to ${params.peerId}` }],
+                        details: { sent: true, peerId: params.peerId },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Failed to send message to ${params.peerId}: ${String(err)}`,
+                            },
+                        ],
+                        details: { sent: false, peerId: params.peerId, error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_broadcast",
+            label: "P2P Broadcast",
+            description: "Broadcast a message to all peers on a topic via the P2P mesh network.",
+            parameters: {
+                type: "object",
+                properties: {
+                    topic: {
+                        type: "string",
+                        description: "Topic name to broadcast on",
+                    },
+                    message: {
+                        type: "string",
+                        description: "Message content to broadcast",
+                    },
+                },
+                required: ["topic", "message"],
+            },
+            async execute(_toolCallId, params) {
+                try {
+                    await mesh.publishToTopic(params.topic, params.message);
+                    return {
+                        content: [{ type: "text", text: `Broadcast sent to topic ${params.topic}` }],
+                        details: { broadcast: true, topic: params.topic },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Failed to broadcast to topic ${params.topic}: ${String(err)}`,
+                            },
+                        ],
+                        details: { broadcast: false, topic: params.topic, error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_list_peers",
+            label: "P2P List Peers",
+            description: "List currently connected peers in the P2P mesh network.",
+            parameters: {
+                type: "object",
+                properties: {},
+            },
+            async execute(_toolCallId) {
+                try {
+                    const peers = mesh.getConnectedPeers();
+                    const text = peers.length === 0
+                        ? "No peers currently connected."
+                        : `Connected peers (${peers.length}): ${peers.join(", ")}`;
+                    return {
+                        content: [{ type: "text", text }],
+                        details: {
+                            localPeerId: mesh.getLocalPeerId(),
+                            connectedPeers: peers,
+                            count: peers.length,
+                        },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [{ type: "text", text: `Failed to list peers: ${String(err)}` }],
+                        details: { error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_get_instance_identity",
+            label: "P2P Get Instance Identity",
+            description: "Get the OpenClaw instance identity (lightweight BAID-inspired ID) of this node.",
+            parameters: {
+                type: "object",
+                properties: {},
+            },
+            async execute(_toolCallId) {
+                try {
+                    const identity = mesh.getInstanceIdentity();
+                    if (!identity) {
+                        return {
+                            content: [{ type: "text", text: "Instance identity not yet initialized." }],
+                            details: { initialized: false },
+                        };
+                    }
+                    const lines = [
+                        `Instance ID: ${identity.id}`,
+                        `Name:        ${identity.name}`,
+                        `Pubkey:      ${identity.pubkey.slice(0, 32)}...`,
+                        `Binding:     ${identity.binding.slice(0, 16)}...`,
+                        `Bound to:    ${identity.bindingComponents.username}@${identity.bindingComponents.hostname} (${identity.bindingComponents.platform})`,
+                        `Created:     ${new Date(identity.createdAt).toLocaleString()}`,
+                    ];
+                    return {
+                        content: [{ type: "text", text: lines.join("\n") }],
+                        details: { identity },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [{ type: "text", text: `Error: ${String(err)}` }],
+                        details: { error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_get_network_info",
+            label: "P2P Get Network Info",
+            description: "Get combined network and identity info: Peer ID, Instance ID, listen addresses, and connected peers.",
+            parameters: {
+                type: "object",
+                properties: {},
+            },
+            async execute(_toolCallId) {
+                try {
+                    const identity = mesh.getInstanceIdentity();
+                    const peerId = mesh.getLocalPeerId();
+                    const addrs = mesh.getMultiaddrs();
+                    const peers = mesh.getConnectedPeers();
+                    const lines = [
+                        `Peer ID:      ${peerId || "(not started)"}`,
+                        `Instance ID:  ${identity?.id || "(not initialized)"}`,
+                        `Instance:     ${identity?.bindingComponents.username}@${identity?.bindingComponents.hostname}` || "",
+                        `Listen Addrs: ${addrs.length > 0 ? addrs.join(", ") : "(none)"}`,
+                        `Connected:    ${peers.length} peer(s)${peers.length > 0 ? ": " + peers.join(", ") : ""}`,
+                    ];
+                    return {
+                        content: [{ type: "text", text: lines.join("\n") }],
+                        details: {
+                            peerId,
+                            instanceId: identity?.id,
+                            listenAddrs: addrs,
+                            connectedPeers: peers,
+                        },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [{ type: "text", text: `Error: ${String(err)}` }],
+                        details: { error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_list_instances",
+            label: "P2P List Instances",
+            description: "List OpenClaw instances discovered through the P2P mesh instance routing table.",
+            parameters: {
+                type: "object",
+                properties: {},
+            },
+            async execute(_toolCallId) {
+                if (!router) {
+                    return {
+                        content: [{ type: "text", text: "Instance router is not initialized." }],
+                        details: { initialized: false },
+                        isError: true,
+                    };
+                }
+                try {
+                    const instances = await router.listInstances();
+                    const connected = new Set(mesh.getConnectedPeers());
+                    const rows = await Promise.all(instances.map(async (entry) => ({
+                        ...entry,
+                        userPublicAttributes: entry.userPublicAttributes ?? [],
+                        connected: connected.has(entry.peerId),
+                        localLabels: options.peerLabelStore
+                            ? await options.peerLabelStore.listLabels(entry.instanceId)
+                            : [],
+                    })));
+                    const text = formatInstanceList(rows);
+                    return {
+                        content: [{ type: "text", text }],
+                        details: { instances: rows, count: rows.length },
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            { type: "text", text: `Failed to list instances: ${String(err)}` },
+                        ],
+                        details: { error: String(err) },
+                        isError: true,
+                    };
+                }
+            },
+        },
+        {
+            name: "p2p_resolve_instance",
+            label: "P2P Resolve Instance",
+            description: "Resolve an OpenClaw instance ID to the current libp2p Peer ID route.",
+            parameters: {
+                type: "object",
+                properties: {
+                    instanceId: {
+                        type: "string",
+                        description: "Target OpenClaw instance ID",
+                    },
+                },
+                required: ["instanceId"],
+            },
+            async execute(_toolCallId, params) {
+                if (!router) {
+                    return {
+                        content: [{ type: "text", text: "Instance router is not initialized." }],
+                        details: { initialized: false },
+                        isError: true,
+                    };
+                }
+                const instanceId = params.instanceId?.trim();
+                if (!instanceId) {
+                    return {
+                        content: [{ type: "text", text: "instanceId is required." }],
+                        details: { error: "instanceId is required" },
+                        isError: true,
+                    };
+                }
+                const route = await router.resolveInstance(instanceId);
+                if (!route) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Instance ${instanceId} has not been discovered. Ask the user to confirm the remote gateway is running and connected to the same P2P network.`,
+                            },
+                        ],
+                        details: { instanceId, found: false },
+                        isError: true,
+                    };
+                }
+                return {
+                    content: [{ type: "text", text: `${route.instanceId} -> ${route.peerId}` }],
+                    details: { found: true, route },
+                };
+            },
+        },
+        {
+            name: "p2p_send_instance_message",
+            label: "P2P Send Instance Message",
+            description: "Send a user message to another OpenClaw instance by instance ID and wait for remote channel delivery ACK.",
+            parameters: {
+                type: "object",
+                properties: {
+                    instanceId: {
+                        type: "string",
+                        description: "Target OpenClaw instance ID",
+                    },
+                    message: {
+                        type: "string",
+                        description: "Message content to send",
+                    },
+                },
+                required: ["instanceId", "message"],
+            },
+            async execute(_toolCallId, params) {
+                if (!router) {
+                    return {
+                        content: [{ type: "text", text: "Instance router is not initialized." }],
+                        details: { initialized: false },
+                        isError: true,
+                    };
+                }
+                const instanceId = params.instanceId?.trim();
+                const message = params.message?.trim();
+                if (!instanceId || !message) {
+                    return {
+                        content: [{ type: "text", text: "instanceId and message are required." }],
+                        details: { error: "instanceId and message are required" },
+                        isError: true,
+                    };
+                }
+                const result = await router.sendInstanceMessage(instanceId, message);
+                if (result.deliveryResults && result.deliveryResults.length > 0) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: formatDeliveryResults(instanceId, result.delivered, result.deliveryResults),
+                            },
+                        ],
+                        details: result,
+                        isError: result.delivered ? undefined : true,
+                    };
+                }
+                if (!result.delivered) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Failed to deliver message to ${instanceId}: ${result.error ?? "unknown error"}`,
+                            },
+                        ],
+                        details: result,
+                        isError: true,
+                    };
+                }
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Message delivered to ${instanceId} via ${result.inboundChannel ?? "remote inbound channel"}.`,
+                        },
+                    ],
+                    details: result,
+                };
+            },
+        },
+        {
+            name: "p2p_send_user_attribute_message",
+            label: "P2P Send User Attribute Message",
+            description: 'Send a user message to discovered OpenClaw instances matching an attribute selector. scope controls the source: "public" for announced user attributes, "local" for local peer labels, or "all" for both; defaults to public. Use selectors like "group=实验室", "project=小龙虾", "tag:P2P", or "#P2P". First run a dry run with dryRun=true to preview targets; if targets match, call again immediately with dryRun=false and the same selector, scope, and message.',
+            parameters: {
+                type: "object",
+                properties: {
+                    selector: {
+                        type: "string",
+                        description: 'Public attribute selector. Use "key=value" for structured profile attributes such as "group=实验室" or "project=小龙虾"; use "tag:value" or "#value" for USER.md tags. Bare values are rejected as ambiguous.',
+                    },
+                    match: {
+                        type: "object",
+                        deprecated: true,
+                        description: 'Deprecated compatibility field. Prefer selector. Use { "kind": "tag", "value": "..." } for USER.md tags or { "kind": "structured", "key": "...", "value": "..." } for profile attributes.',
+                        oneOf: [
+                            {
+                                type: "object",
+                                additionalProperties: false,
+                                properties: {
+                                    kind: { const: "tag" },
+                                    value: {
+                                        type: "string",
+                                        description: "Tag value to match.",
+                                    },
+                                },
+                                required: ["kind", "value"],
+                            },
+                            {
+                                type: "object",
+                                additionalProperties: false,
+                                properties: {
+                                    kind: { const: "structured" },
+                                    key: {
+                                        type: "string",
+                                        description: "Structured attribute key to match.",
+                                    },
+                                    value: {
+                                        type: "string",
+                                        description: "Structured attribute value to match.",
+                                    },
+                                },
+                                required: ["kind", "key", "value"],
+                            },
+                        ],
+                    },
+                    message: {
+                        type: "string",
+                        description: "Message content to send after a matching dry run.",
+                    },
+                    dryRun: {
+                        type: "boolean",
+                        description: "Preview matching instances without sending. Run this before group sending.",
+                    },
+                    scope: {
+                        type: "string",
+                        enum: ["public", "local", "all"],
+                        description: "Attribute source to match: public announced attributes, local peer labels, or both. Defaults to public.",
+                    },
+                },
+                required: ["message"],
+                anyOf: [{ required: ["selector"] }, { required: ["match"] }],
+            },
+            async execute(_toolCallId, params) {
+                if (!router) {
+                    return {
+                        content: [{ type: "text", text: "Instance router is not initialized." }],
+                        details: { initialized: false },
+                        isError: true,
+                    };
+                }
+                const match = normalizeUserAttributeMatch(params);
+                const scopeError = validateUserAttributeScope(params.scope);
+                const scope = normalizeUserAttributeScope(params.scope);
+                const message = typeof params.message === "string" ? params.message.trim() : "";
+                if (typeof match === "string" || scopeError || !message) {
+                    const error = typeof match === "string"
+                        ? match
+                        : scopeError
+                            ? scopeError
+                            : "message is required.";
+                    return {
+                        content: [{ type: "text", text: error }],
+                        details: { error },
+                        isError: true,
+                    };
+                }
+                const dryRun = params.dryRun === true;
+                const options = scope ? { dryRun, scope } : { dryRun };
+                const result = await router.sendUserAttributeMessage(match, message, options);
+                if (result.error) {
+                    return {
+                        content: [{ type: "text", text: result.error }],
+                        details: result,
+                        isError: true,
+                    };
+                }
+                if (dryRun) {
+                    const targetLines = formatUserAttributeTargets(result.targets ?? []);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: [
+                                    `Dry run matched ${result.matched} instance(s). No message was sent.`,
+                                    ...targetLines,
+                                ].join("\n"),
+                            },
+                        ],
+                        details: result,
+                    };
+                }
+                const resultLines = formatUserAttributeResults(result.results ?? []);
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: [
+                                `Matched ${result.matched} instance(s); sent ${result.sent}; delivered ${result.delivered}; failed ${result.failed}.`,
+                                ...resultLines,
+                            ].join("\n"),
+                        },
+                    ],
+                    details: result,
+                    isError: result.failed > 0 ? true : undefined,
+                };
+            },
+        },
+    ];
+}
+//# sourceMappingURL=agent-tools.js.map

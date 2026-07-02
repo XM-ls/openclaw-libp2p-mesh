@@ -11,6 +11,9 @@ import { createOpenClawUserMdAttributeExtractor } from "./user-md-openclaw-extra
 import { createUserProfileStore } from "./user-profile-store.js";
 import { buildP2PTools } from "./agent-tools.js";
 import { registerLibp2pMeshCli } from "./profile-cli.js";
+import { autoInstallAgentPrompt, type AutoInstallAgentPromptOptions } from "./prompt-config.js";
+import { applyDefaultMeshConfig } from "./setup-config.js";
+import { setLibp2pMeshRuntime } from "../runtime-setter-api.js";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { MeshConfig } from "./types.js";
 
@@ -19,6 +22,7 @@ const DEFAULT_PUBLIC_ATTRIBUTE_REFRESH_STARTUP_DELAY_MS = 10000;
 export type Libp2pMeshPluginDeps = {
   createMeshNetwork?: typeof createMeshNetwork;
   createInstanceRouter?: typeof createInstanceRouter;
+  autoInstallAgentPrompt?: (options?: AutoInstallAgentPromptOptions) => Promise<void>;
 };
 
 export function registerLibp2pMesh(api: OpenClawPluginApi) {
@@ -29,7 +33,14 @@ export function registerLibp2pMeshWithDeps(
   api: OpenClawPluginApi,
   deps: Libp2pMeshPluginDeps = {},
 ) {
-  const config = api.pluginConfig as MeshConfig | undefined;
+  const config = applyDefaultMeshConfig(api.pluginConfig as MeshConfig | undefined);
+  void (deps.autoInstallAgentPrompt ?? autoInstallAgentPrompt)({ logger: api.logger }).catch((error) => {
+    try {
+      api.logger.warn?.(`[libp2p-mesh] Failed to auto-install agent prompt: ${String(error)}`);
+    } catch {
+      // Ignore logger failures so prompt installation remains fire-and-forget.
+    }
+  });
   let unsubscribeInbound: (() => void) | undefined;
   let serviceStarted = false;
   let startPromise: Promise<void> | undefined;
@@ -38,6 +49,7 @@ export function registerLibp2pMeshWithDeps(
     config,
     logger: api.logger,
   });
+  setLibp2pMeshRuntime(mesh);
   const store = createInstancePeerStore({ logger: api.logger });
   const peerLabelStore = createPeerLabelStore({ logger: api.logger });
   const userAttributeSource = createUserMdAgentAttributeSource({
@@ -75,11 +87,6 @@ export function registerLibp2pMeshWithDeps(
     profile: {
       async afterProfileSave() {
         await router.refreshPublicAttributes();
-      },
-    },
-    labels: {
-      async afterLabelsSave(instanceId) {
-        await store.updateLocalLabels(instanceId, await peerLabelStore.listLabels(instanceId));
       },
     },
   });
@@ -148,6 +155,7 @@ export function registerLibp2pMeshWithDeps(
 
   async function cleanupStartupFailure(): Promise<void> {
     clearPublicAttributeRefreshTimer();
+    setLibp2pMeshRuntime(undefined);
     try {
       unsubscribeInbound?.();
     } catch (error) {
@@ -196,7 +204,7 @@ export function registerLibp2pMeshWithDeps(
           router.attachHandlers();
           unsubscribeInbound = attachInboundHandlers();
           await mesh.start();
-          await router.start();
+          await router.announceToConnectedPeers();
           const identity = mesh.getInstanceIdentity();
           api.logger.info?.(
             `[libp2p-mesh] Service started. Peer ID: ${mesh.getLocalPeerId()}`,
@@ -233,6 +241,7 @@ export function registerLibp2pMeshWithDeps(
     stop: async () => {
       await startPromise?.catch(() => undefined);
       clearPublicAttributeRefreshTimer();
+      setLibp2pMeshRuntime(undefined);
       unsubscribeInbound?.();
       unsubscribeInbound = undefined;
       await router.stop();

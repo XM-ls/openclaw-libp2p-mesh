@@ -6,14 +6,9 @@ import type {
   InstancePeerRecord,
   InstancePeerStore,
   InstancePeerTable,
-  LocalPeerLabelAttribute,
   UserPublicAttribute,
 } from "./types.js";
-import {
-  normalizeAttributeKey,
-  normalizeAttributeValue,
-  normalizeUserPublicAttribute,
-} from "./user-attributes.js";
+import { normalizeUserPublicAttribute } from "./user-attributes.js";
 
 export interface StoreLogger {
   info?(message: string): void;
@@ -55,90 +50,6 @@ function normalizeUserPublicAttributes(value: unknown): UserPublicAttribute[] {
     .filter((attribute): attribute is UserPublicAttribute => attribute !== undefined);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function trimmedString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function localLabelDedupeKey(label: LocalPeerLabelAttribute): string {
-  return `${normalizeAttributeKey(label.key)}:${normalizeAttributeValue(label.value)}`;
-}
-
-function normalizeLocalLabel(value: unknown): LocalPeerLabelAttribute | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  if (value.kind !== "structured" || value.source !== "local") {
-    return undefined;
-  }
-
-  const key = trimmedString(value.key);
-  const labelValue = trimmedString(value.value);
-  const label = trimmedString(value.label);
-  if (!key || !labelValue || !label) {
-    return undefined;
-  }
-
-  return {
-    kind: "structured",
-    key: normalizeAttributeKey(key),
-    value: labelValue,
-    label,
-    source: "local",
-  };
-}
-
-function normalizeLocalLabels(value: unknown): LocalPeerLabelAttribute[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const normalized: LocalPeerLabelAttribute[] = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    const label = normalizeLocalLabel(entry);
-    if (!label) {
-      continue;
-    }
-
-    const id = localLabelDedupeKey(label);
-    if (seen.has(id)) {
-      continue;
-    }
-
-    seen.add(id);
-    normalized.push(label);
-  }
-
-  return normalized;
-}
-
-function withLocalLabels(
-  record: InstancePeerRecord,
-  labels: LocalPeerLabelAttribute[],
-): InstancePeerRecord {
-  const normalizedLabels = normalizeLocalLabels(labels);
-  if (normalizedLabels.length === 0) {
-    const { localLabels: _localLabels, ...withoutLocalLabels } = record;
-    return withoutLocalLabels;
-  }
-
-  return {
-    ...record,
-    localLabels: normalizedLabels,
-  };
-}
-
 function sameUserPublicAttributes(a: UserPublicAttribute[] = [], b: UserPublicAttribute[] = []): boolean {
   if (a.length !== b.length) return false;
   return a.every((attribute, index) => {
@@ -169,12 +80,10 @@ function sameRecord(
 }
 
 function normalizeRecord(value: InstancePeerRecord): InstancePeerRecord {
-  const record = {
+  return {
     ...value,
     userPublicAttributes: normalizeUserPublicAttributes(value.userPublicAttributes),
   };
-
-  return withLocalLabels(record, normalizeLocalLabels(value.localLabels));
 }
 
 function normalizeTable(value: unknown): InstancePeerTable {
@@ -284,9 +193,8 @@ export function createInstancePeerStore(options?: {
           "userPublicAttributes" in payload
             ? normalizeUserPublicAttributes(payload.userPublicAttributes)
             : normalizeUserPublicAttributes(existing?.userPublicAttributes);
-        const localLabels = normalizeLocalLabels(existing?.localLabels);
         const changed = !sameRecord(existing, payload);
-        const record: InstancePeerRecord = withLocalLabels({
+        const record: InstancePeerRecord = {
           instanceId: payload.instanceId,
           peerId: payload.peerId,
           instanceName: payload.instanceName,
@@ -296,7 +204,7 @@ export function createInstancePeerStore(options?: {
           lastAnnouncedAt: payload.announcedAt,
           lastSeenAt: Date.now(),
           source: "announce",
-        }, localLabels);
+        };
 
         const nextTable: InstancePeerTable = {
           ...table,
@@ -317,49 +225,6 @@ export function createInstancePeerStore(options?: {
 
         await save(nextTable);
         return { record, changed, peerIdSharedBy };
-      });
-    },
-    async syncLocalLabels(
-      labelsByInstance: Record<string, LocalPeerLabelAttribute[]>,
-    ): Promise<InstancePeerTable> {
-      return runMutation(async () => {
-        const table = await load();
-        const instances: Record<string, InstancePeerRecord> = {};
-
-        for (const [instanceId, record] of Object.entries(table.instances)) {
-          instances[instanceId] = withLocalLabels(
-            record,
-            labelsByInstance[instanceId] ?? [],
-          );
-        }
-
-        return save({
-          ...table,
-          instances,
-        });
-      });
-    },
-    async updateLocalLabels(
-      instanceId: string,
-      labels: LocalPeerLabelAttribute[],
-    ): Promise<InstancePeerRecord | undefined> {
-      return runMutation(async () => {
-        const table = await load();
-        const existing = table.instances[instanceId];
-        if (!existing) {
-          return undefined;
-        }
-
-        const record = withLocalLabels(existing, labels);
-        await save({
-          ...table,
-          instances: {
-            ...table.instances,
-            [instanceId]: record,
-          },
-        });
-
-        return record;
       });
     },
   };

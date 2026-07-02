@@ -3,7 +3,7 @@ import type { AnnounceLogDetail, InboundTargetConfig, MeshConfig } from "./types
 export const LIBP2P_MESH_PLUGIN_ID = "libp2p-mesh";
 export const DEFAULT_DELIVERY_ACK_TIMEOUT_MS = 15000;
 
-export type SetupMode = "lan" | "cross-network" | "relay-node" | "tools-only";
+export type SetupMode = "lan" | "cross-network" | "relay-node";
 
 export type OpenClawConfigLike = {
   plugins?: {
@@ -28,11 +28,25 @@ export type RelayNodeOptions = {
   announceAddrs: string[];
 };
 
+export type NetworkEntryOptions = {
+  bootstrapList: string[];
+  relayList: string[];
+};
+
+export type PublicRelayNodeOptions =
+  | { enabled: false }
+  | { enabled: true; listenAddrs: string[]; announceAddrs: string[] };
+
 export type AddInboundTargetResult =
   | { ok: true; targets: InboundTargetConfig[]; added: InboundTargetConfig }
   | { ok: false; targets: InboundTargetConfig[]; error: string };
 
 export type LegacyInboundMigrationMode = "convert" | "keep" | "replace";
+
+export type InboundTargetSyncPlan = {
+  targets: InboundTargetConfig[];
+  missingChannels: string[];
+};
 
 export function getLibp2pMeshConfig(config: OpenClawConfigLike): MeshConfig | undefined {
   return config.plugins?.entries?.[LIBP2P_MESH_PLUGIN_ID]?.config as MeshConfig | undefined;
@@ -60,13 +74,6 @@ export function buildNetworkConfig(
         deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
       };
 
-    case "tools-only":
-      return {
-        discovery: "mdns",
-        inboundTargets: [],
-        deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
-      };
-
     case "cross-network": {
       const relayList = options?.crossNetwork?.relayList;
       return {
@@ -88,6 +95,45 @@ export function buildNetworkConfig(
         deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
       };
   }
+}
+
+export function buildNetworkEntryConfig(options: NetworkEntryOptions): MeshConfig {
+  return {
+    ...(options.bootstrapList.length > 0 ? { bootstrapList: [...options.bootstrapList] } : {}),
+    ...(options.relayList.length > 0 ? { relayList: [...options.relayList] } : {}),
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  };
+}
+
+export function buildPublicRelayNodeConfig(options: PublicRelayNodeOptions): MeshConfig {
+  if (!options.enabled) {
+    return {
+      enableCircuitRelayServer: false,
+      deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    };
+  }
+
+  return {
+    listenAddrs: [...options.listenAddrs],
+    ...(options.announceAddrs.length > 0 ? { announceAddrs: [...options.announceAddrs] } : {}),
+    enableCircuitRelayServer: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  };
+}
+
+export function applyDefaultMeshConfig(config: MeshConfig | undefined): MeshConfig {
+  const base =
+    config && typeof config === "object" && !Array.isArray(config)
+      ? config
+      : undefined;
+
+  return {
+    discovery: "mdns",
+    enableNATTraversal: true,
+    enableDHT: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    ...(base ?? {}),
+  };
 }
 
 export function applyPluginConfig(config: OpenClawConfigLike, pluginConfig: MeshConfig): OpenClawConfigLike {
@@ -157,6 +203,45 @@ export function mergeNetworkConfig(existing: MeshConfig | undefined, networkConf
 
 export function listConfiguredChannels(config: OpenClawConfigLike): string[] {
   return Object.keys(config.channels ?? {}).filter((channel) => channel !== LIBP2P_MESH_PLUGIN_ID);
+}
+
+export function planInboundTargetSync(
+  existingTargets: InboundTargetConfig[],
+  configuredChannels: string[],
+): InboundTargetSyncPlan {
+  const targets: InboundTargetConfig[] = [];
+  const missingChannels: string[] = [];
+  const seenTargetKeys = new Set<string>();
+  const coveredChannels = new Set<string>();
+
+  for (const target of existingTargets) {
+    const channel = typeof target.channel === "string" ? target.channel.trim() : "";
+    const inboundTarget = typeof target.target === "string" ? target.target.trim() : "";
+    const targetKey = `${channel}\u0000${inboundTarget}`;
+    if (!channel || !inboundTarget || seenTargetKeys.has(targetKey)) {
+      continue;
+    }
+
+    seenTargetKeys.add(targetKey);
+    coveredChannels.add(channel);
+    targets.push({
+      ...target,
+      channel,
+      target: inboundTarget,
+    });
+  }
+
+  for (const configuredChannel of configuredChannels) {
+    const channel = typeof configuredChannel === "string" ? configuredChannel.trim() : "";
+    if (!channel || channel === LIBP2P_MESH_PLUGIN_ID || coveredChannels.has(channel)) {
+      continue;
+    }
+
+    coveredChannels.add(channel);
+    missingChannels.push(channel);
+  }
+
+  return { targets, missingChannels };
 }
 
 export function generateInboundTargetId(channel: string, existingTargets: InboundTargetConfig[]): string {

@@ -1,13 +1,1 @@
-node_modules/
-dist/
-.pptx-venv/
-__pycache__/
-scripts/__pycache__/
-*.log
-.DS_Store
-*.heapsnapshot
-.env
-.env.local
-opencode.json
-/tmp/
-*.tsbuildinfo
+node_modules

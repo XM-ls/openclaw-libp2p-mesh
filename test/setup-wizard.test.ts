@@ -1,573 +1,796 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
+import { runSetupWizard } from "../src/setup-wizard.js";
 
-import {
-  SetupCancelledError,
-  formatPluginEntryPreview,
-  runSetupWizard,
-  type SetupConfigWriter,
-  type SetupPrompter,
-} from "../src/setup-wizard.js";
-import type { OpenClawConfigLike } from "../src/setup-config.js";
-
-function makePrompter(script: Array<string | boolean>): SetupPrompter {
-  const values = [...script];
-  return {
-    async confirm() {
-      const value = values.shift();
-      assert.equal(typeof value, "boolean");
-      return value;
-    },
-    async select() {
-      const value = values.shift();
-      assert.equal(typeof value, "string");
-      return value;
-    },
-    async input() {
-      const value = values.shift();
-      assert.equal(typeof value, "string");
-      return value;
-    },
-    print() {},
-  };
-}
-
-function makeWriter() {
-  const writes: OpenClawConfigLike[] = [];
-  const writer: SetupConfigWriter = {
-    async write(nextConfig) {
-      writes.push(nextConfig);
-    },
-  };
-  return { writer, writes };
-}
-
-test("first run applies LAN config with multiple inbound targets after preview confirmation", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      true,
-      "lan",
-      "add-targets",
-      "feishu",
-      "user:ou_xxx",
-      "add-target",
-      "telegram",
-      "chat:123456",
-      "finish-targets",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.equal(result.message, "Config updated.\n\nRestart the gateway to apply changes:\nopenclaw gateway restart");
-  assert.equal(writes.length, 1);
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"], {
-    enabled: true,
-    config: {
-      discovery: "mdns",
-      inboundTargets: [
-        { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-        { id: "telegram-main", channel: "telegram", target: "chat:123456" },
-      ],
-      deliveryAckTimeoutMs: 15000,
-    },
-  });
-  assert.equal(writes[0]?.channels?.["libp2p-mesh"], undefined);
-});
-
-test("existing config edit can add target and keep network mode after preview-apply", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [
-                { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-              ],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "add-target",
-      "telegram",
-      "chat:123456",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [
-      { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-      { id: "telegram-main", channel: "telegram", target: "chat:123456" },
-    ],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing legacy inbound edit can keep legacy fields without writing empty inboundTargets", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundChannel: "feishu",
-              inboundTarget: "user:legacy",
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-    },
-    writer,
-    prompter: makePrompter(["inbound-targets", "keep-legacy-inbound", "preview-apply", true]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundChannel: "feishu",
-    inboundTarget: "user:legacy",
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing legacy inbound edit can convert legacy fields to inboundTargets", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundChannel: "feishu",
-              inboundTarget: "user:legacy",
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-    },
-    writer,
-    prompter: makePrompter(["inbound-targets", "convert-legacy-inbound", "preview-apply", true]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:legacy" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing legacy inbound edit can replace legacy fields with new inboundTargets", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundChannel: "feishu",
-              inboundTarget: "user:legacy",
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-      channels: {
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "replace-legacy-inbound",
-      "telegram",
-      "chat:123456",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing inbound target menu can remove a target", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [
-                { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-                { id: "telegram-main", channel: "telegram", target: "chat:123456" },
-              ],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "remove-target",
-      "feishu-main",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing inbound target menu can edit a target", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "edit-target",
-      "feishu-main",
-      "telegram",
-      "chat:edited",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ id: "feishu-main", channel: "telegram", target: "chat:edited" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing inbound target menu can edit a target without an id", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [{ channel: "feishu", target: "user:ou_xxx" }],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "edit-target",
-      "target-1",
-      "telegram",
-      "chat:edited",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ channel: "telegram", target: "chat:edited" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing inbound target menu can remove a target without an id", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [
-                { channel: "feishu", target: "user:ou_xxx" },
-                { id: "telegram-main", channel: "telegram", target: "chat:123456" },
-              ],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "inbound-targets",
-      "remove-target",
-      "target-1",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [{ id: "telegram-main", channel: "telegram", target: "chat:123456" }],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing inbound target menu can disable inbound delivery", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundChannel: "feishu",
-              inboundTarget: "user:legacy",
-              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-    },
-    writer,
-    prompter: makePrompter(["inbound-targets", "disable-inbound", "preview-apply", true]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "mdns",
-    inboundTargets: [],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("existing config edit loops until preview-apply after changing network mode and inbound targets", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {
-      plugins: {
-        entries: {
-          "libp2p-mesh": {
-            enabled: true,
-            config: {
-              discovery: "mdns",
-              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-              deliveryAckTimeoutMs: 15000,
-            },
-          },
-        },
-      },
-      channels: {
-        feishu: { enabled: true },
-        telegram: { enabled: true },
-      },
-    },
-    writer,
-    prompter: makePrompter([
-      "network-mode",
-      "cross-network",
-      "/ip4/203.0.113.10/tcp/4001/p2p/peer",
-      false,
-      "",
-      "inbound-targets",
-      "add-target",
-      "telegram",
-      "chat:123456",
-      "finish-targets",
-      "preview-apply",
-      true,
-    ]),
-  });
-
-  assert.equal(result.status, "applied");
-  assert.deepEqual(writes[0]?.plugins?.entries?.["libp2p-mesh"]?.config, {
-    discovery: "bootstrap",
-    bootstrapList: ["/ip4/203.0.113.10/tcp/4001/p2p/peer"],
-    enableNATTraversal: true,
-    inboundTargets: [
-      { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-      { id: "telegram-main", channel: "telegram", target: "chat:123456" },
-    ],
-    deliveryAckTimeoutMs: 15000,
-  });
-});
-
-test("preview rejection cancels without writing", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {},
-    writer,
-    prompter: makePrompter([true, "tools-only", "disable-inbound", false]),
-  });
-
-  assert.equal(result.status, "cancelled");
-  assert.equal(writes.length, 0);
-});
-
-test("Ctrl+C cancellation exits without writing", async () => {
-  const { writer, writes } = makeWriter();
-  const prompter: SetupPrompter = {
-    async confirm() {
-      throw new SetupCancelledError();
-    },
-    async select() {
-      throw new SetupCancelledError();
-    },
-    async input() {
-      throw new SetupCancelledError();
-    },
-    print() {},
-  };
+test("runSetupWizard first-run inbound setup uses receive-message wording", async () => {
+  const inputs = ["", ""];
+  const selections = ["skip-inbound"];
+  let sawInboundSetupPrompt = false;
 
   const result = await runSetupWizard({
     currentConfig: {},
-    writer,
-    prompter,
-  });
-
-  assert.equal(result.status, "cancelled");
-  assert.equal(result.message, "Configuration cancelled. No changes were written.");
-  assert.equal(writes.length, 0);
-});
-
-test("Ctrl+C cancellation from select exits without writing", async () => {
-  const { writer, writes } = makeWriter();
-  const result = await runSetupWizard({
-    currentConfig: {},
-    writer,
     prompter: {
-      async confirm() {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
         return true;
       },
-      async select() {
-        throw new SetupCancelledError();
+      async select(message, choices) {
+        assert.notEqual(message, "Choose network setup:");
+        const value = selections.shift();
+        assert.ok(value);
+
+        if (message === "Configure where received P2P messages should appear?") {
+          sawInboundSetupPrompt = true;
+          assert.deepEqual(
+            choices.map((choice) => choice.label),
+            [
+              "Sync from existing channels",
+              "Add a target manually",
+              "Do not receive P2P messages in local channels",
+              "Leave unchanged for now",
+            ],
+          );
+          assert.deepEqual(
+            choices.map((choice) => choice.value),
+            ["sync-from-channels", "add-targets", "disable-inbound", "skip-inbound"],
+          );
+        }
+
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
       },
-      async input() {
-        throw new Error("input should not be called");
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
       },
       print() {},
     },
+    writer: {
+      async write() {},
+    },
   });
 
-  assert.equal(result.status, "cancelled");
-  assert.equal(result.message, "Configuration cancelled. No changes were written.");
-  assert.equal(writes.length, 0);
+  assert.equal(result.status, "applied");
+  assert.equal(sawInboundSetupPrompt, true);
 });
 
-test("Ctrl+C cancellation from input exits without writing", async () => {
-  const { writer, writes } = makeWriter();
+test("runSetupWizard first-run skips optional network entry addresses and does not write empty lists", async () => {
+  const inputs = ["", ""];
+  const selections = ["skip-inbound"];
+  let writtenConfig: any;
+  const prints: string[] = [];
+
   const result = await runSetupWizard({
     currentConfig: {},
-    writer,
     prompter: {
-      async confirm() {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
         return true;
       },
-      async select() {
-        return "relay-node";
+      async select(message, choices) {
+        assert.notEqual(message, "Choose network setup:");
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.equal(pluginConfig.bootstrapList, undefined);
+  assert.equal(pluginConfig.relayList, undefined);
+  assert.match(prints.join("\n"), /Network discovery is enabled automatically/);
+});
+
+test("runSetupWizard existing config edit menu uses setup and received-message wording", async () => {
+  let sawEditMenu = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        assert.equal(message, "What do you want to edit?");
+        sawEditMenu = true;
+        assert.deepEqual(
+          choices.map((choice) => choice.label),
+          [
+            "Sync inbound targets from channels",
+            "Network entry addresses",
+            "Public relay-node settings",
+            "Where received P2P messages appear",
+            "Cancel",
+          ],
+        );
+        assert.deepEqual(
+          choices.map((choice) => choice.value),
+          ["sync-from-channels", "network-entry-addresses", "public-relay-node", "inbound-targets", "cancel"],
+        );
+        return "cancel";
       },
       async input() {
-        throw new SetupCancelledError();
+        assert.fail("Previewing existing config should not prompt for input");
       },
       print() {},
+    },
+    writer: {
+      async write() {},
     },
   });
 
   assert.equal(result.status, "cancelled");
-  assert.equal(result.message, "Configuration cancelled. No changes were written.");
-  assert.equal(writes.length, 0);
+  assert.equal(sawEditMenu, true);
 });
 
-test("formatPluginEntryPreview prints enabled plugin entry JSON", () => {
-  assert.match(
-    formatPluginEntryPreview({
-      discovery: "mdns",
-      inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
-      deliveryAckTimeoutMs: 15000,
-    }),
-    /"enabled": true/,
-  );
+test("runSetupWizard manual inbound target prompt includes selected channel name", async () => {
+  const inputs = ["", "", "user:ou_xxx"];
+  const selections = ["add-targets", "feishu", "finish-targets"];
+  let sawTargetPrompt = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      channels: {
+        feishu: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        if (value === "finish-targets") {
+          assert.equal(choices.find((choice) => choice.value === "finish-targets")?.label, "Finish editing");
+        }
+        return value;
+      },
+      async input(message, options) {
+        if (/^(Bootstrap|Relay) multiaddr/.test(message)) {
+          assert.equal(options?.required, false);
+          return inputs.shift() ?? "";
+        }
+        assert.equal(message, "Target for feishu");
+        assert.equal(options?.required, true);
+        sawTargetPrompt = true;
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write() {},
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sawTargetPrompt, true);
+});
+
+test("runSetupWizard syncs missing inbound targets from configured channels without overwriting existing ones", async () => {
+  const prints: string[] = [];
+  const inputs = ["chat:123456"];
+  const selections = ["sync-from-channels"];
+  let writtenConfig: unknown;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.equal(message, "Target for telegram (leave empty to skip)");
+        assert.equal(options?.required, false);
+        const value = inputs.shift();
+        assert.ok(value);
+        return value;
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.ok(writtenConfig);
+
+  const nextConfig = writtenConfig as {
+    plugins?: {
+      entries?: {
+        "libp2p-mesh"?: {
+          config?: {
+            inboundTargets?: Array<{ id?: string; channel: string; target: string }>;
+          };
+        };
+      };
+    };
+  };
+
+  assert.deepEqual(nextConfig.plugins?.entries?.["libp2p-mesh"]?.config?.inboundTargets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+    { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+  ]);
+  assert.match(prints.join("\n"), /Current libp2p-mesh config:/);
+});
+
+test("runSetupWizard skips configured channels when sync target input is empty", async () => {
+  const prints: string[] = [];
+  const inputs = ["chat:123456", ""];
+  const selections = ["sync-from-channels"];
+  let writtenConfig: unknown;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+        qqbot: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^Target for (telegram|qqbot) \(leave empty to skip\)$/);
+        assert.equal(options?.required, false);
+        const value = inputs.shift();
+        assert.notEqual(value, undefined);
+        return value ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.ok(writtenConfig);
+
+  const nextConfig = writtenConfig as {
+    plugins?: {
+      entries?: {
+        "libp2p-mesh"?: {
+          config?: {
+            inboundTargets?: Array<{ id?: string; channel: string; target: string }>;
+          };
+        };
+      };
+    };
+  };
+
+  assert.deepEqual(nextConfig.plugins?.entries?.["libp2p-mesh"]?.config?.inboundTargets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+    { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+  ]);
+
+  const output = prints.join("\n");
+  assert.match(output, /Already configured:/);
+  assert.match(output, /Channels without inbound targets:/);
+  assert.match(output, /Leave a target empty to skip that channel\./);
+  assert.match(output, /Added:/);
+  assert.match(output, /telegram-main     telegram \/ chat:123456/);
+  assert.match(output, /Skipped:/);
+  assert.match(output, /qqbot/);
+});
+
+test("runSetupWizard preserves existing inbound targets when all sync inputs are skipped", async () => {
+  const prints: string[] = [];
+  const inputs = ["", ""];
+  const selections = ["sync-from-channels"];
+  let writtenConfig: unknown;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+        qqbot: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^Target for (telegram|qqbot) \(leave empty to skip\)$/);
+        assert.equal(options?.required, false);
+        const value = inputs.shift();
+        assert.notEqual(value, undefined);
+        return value ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.ok(writtenConfig);
+
+  const nextConfig = writtenConfig as {
+    plugins?: {
+      entries?: {
+        "libp2p-mesh"?: {
+          config?: {
+            inboundTargets?: Array<{ id?: string; channel: string; target: string }>;
+          };
+        };
+      };
+    };
+  };
+
+  assert.deepEqual(nextConfig.plugins?.entries?.["libp2p-mesh"]?.config?.inboundTargets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+  ]);
+
+  const output = prints.join("\n");
+  assert.match(output, /No inbound targets were added\./);
+  assert.match(output, /Skipped:/);
+  assert.match(output, /telegram/);
+  assert.match(output, /qqbot/);
+});
+
+test("runSetupWizard keeps existing network entry addresses when inputs are empty", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = ["", ""];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.notEqual(message, "Choose network setup:");
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.deepEqual(writtenConfig.plugins.entries["libp2p-mesh"].config.bootstrapList, [
+    "/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap",
+  ]);
+  assert.deepEqual(writtenConfig.plugins.entries["libp2p-mesh"].config.relayList, [
+    "/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay",
+  ]);
+});
+
+test("runSetupWizard treats whitespace network entry inputs as empty and trims replacements", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = ["   ", "  /ip4/8.8.8.8/tcp/4001/p2p/12D3TrimmedRelay  "];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another relay?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/8.8.8.8/tcp/4001/p2p/12D3TrimmedRelay"]);
+});
+
+test("runSetupWizard reprompts for blank follow-up network entry addresses", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = [
+    " /ip4/9.9.9.9/tcp/4001/p2p/12D3FirstBootstrap ",
+    "   ",
+    " /ip4/9.9.9.10/tcp/4001/p2p/12D3SecondBootstrap ",
+    "",
+  ];
+  const addAnotherResponses = [true, false];
+  const expectedRequired = [false, true, true, false];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3OldBootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another bootstrap?") {
+          return addAnotherResponses.shift() ?? false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, expectedRequired.shift());
+        const value = inputs.shift() ?? "";
+        return value;
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, [
+    "/ip4/9.9.9.9/tcp/4001/p2p/12D3FirstBootstrap",
+    "/ip4/9.9.9.10/tcp/4001/p2p/12D3SecondBootstrap",
+  ]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"]);
+});
+
+test("runSetupWizard replaces network entry addresses when new values are entered", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = [
+    "/ip4/9.9.9.9/tcp/4001/p2p/12D3NewBootstrap",
+    "/ip4/8.8.8.8/tcp/4001/p2p/12D3NewRelay",
+  ];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3OldBootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another bootstrap?" || message === "Add another relay?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/9.9.9.9/tcp/4001/p2p/12D3NewBootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/8.8.8.8/tcp/4001/p2p/12D3NewRelay"]);
+  assert.equal(pluginConfig.discovery, undefined);
+});
+
+test("runSetupWizard can disable public relay-node settings", async () => {
+  const selections = ["public-relay-node"];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+              listenAddrs: ["/ip4/0.0.0.0/tcp/4001"],
+              announceAddrs: ["/ip4/203.0.113.10/tcp/4001/p2p/12D3Announce"],
+              enableCircuitRelayServer: true,
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Enable this machine as a public relay node?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input() {
+        assert.fail("Disabling public relay node should not prompt for addresses");
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"]);
+  assert.equal(pluginConfig.listenAddrs, undefined);
+  assert.equal(pluginConfig.announceAddrs, undefined);
+  assert.equal(pluginConfig.enableCircuitRelayServer, false);
+});
+
+test("runSetupWizard enables public relay node with default listen address and optional announce", async () => {
+  const selections = ["public-relay-node"];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
+              announceAddrs: ["/ip4/203.0.113.10/tcp/4001/p2p/12D3OldAnnounce"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Enable this machine as a public relay node?") {
+          return true;
+        }
+        if (message === "Add another public announce address?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        if (message === "Listen address") {
+          assert.equal(options?.defaultValue, "/ip4/0.0.0.0/tcp/4001");
+          assert.equal(options?.required, true);
+          return options.defaultValue;
+        }
+
+        assert.equal(message, "Public announce address (optional, leave empty to skip)");
+        assert.equal(options?.required, false);
+        return "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"]);
+  assert.deepEqual(pluginConfig.listenAddrs, ["/ip4/0.0.0.0/tcp/4001"]);
+  assert.equal(pluginConfig.enableCircuitRelayServer, true);
+  assert.equal(pluginConfig.announceAddrs, undefined);
 });

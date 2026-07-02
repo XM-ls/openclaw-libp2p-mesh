@@ -1,43 +1,54 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
+import test from "node:test";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import { DEFAULT_DELIVERY_ACK_TIMEOUT_MS } from "../src/setup-config.js";
+import type {
+  InstancePeerRecord,
+  InstanceRouter,
+  InstanceRouterOptions,
+  MeshConfig,
+  MeshNetwork,
+  P2PMessage,
+  UserAttributeMatch,
+  UserAttributeMessageOptions,
+  UserAttributeMessageResult,
+} from "../src/types.js";
 
-import { registerLibp2pMeshWithDeps } from "../src/plugin.js";
-import type { InstanceRouter, MeshNetwork, P2PMessage } from "../src/types.js";
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith("/runtime-setter-api.js")) {
+      return {
+        url: [
+          "data:text/javascript,",
+          encodeURIComponent(
+            [
+              "export function setLibp2pMeshRuntime() {}",
+              "export function getLibp2pMeshRuntime() { throw new Error('runtime unavailable in lifecycle test'); }",
+              "export function hasLibp2pMeshRuntime() { return false; }",
+            ].join("\n"),
+          ),
+        ].join(""),
+        shortCircuit: true,
+      };
+    }
 
-type ServiceRegistration = {
-  id: string;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-};
+    return nextResolve(specifier, context);
+  },
+});
 
-function makeMesh(calls: string[]): MeshNetwork {
-  const messageHandlers = new Set<(msg: P2PMessage) => void>();
+async function loadPlugin() {
+  return import("../src/plugin.js");
+}
 
+function createMeshStub(): MeshNetwork {
   return {
-    async start() {
-      calls.push("mesh.start");
-      for (const handler of messageHandlers) {
-        handler({
-          id: "direct-before-start-complete",
-          type: "direct",
-          from: "remote-peer",
-          payload: "hello before start completes",
-          timestamp: 1,
-        });
-      }
-    },
-    async stop() {
-      calls.push("mesh.stop");
-    },
+    async start() {},
+    async stop() {},
     async sendToPeer() {},
     async sendStructuredMessage() {},
-    onMessage(handler) {
-      calls.push("inbound.attach");
-      messageHandlers.add(handler);
-      return () => {
-        calls.push("inbound.unsubscribe");
-        messageHandlers.delete(handler);
-      };
+    onMessage() {
+      return () => {};
     },
     onPeerConnect() {
       return () => {};
@@ -48,7 +59,7 @@ function makeMesh(calls: string[]): MeshNetwork {
     async publishToTopic() {},
     async subscribeToTopic() {},
     getLocalPeerId() {
-      return "local-peer";
+      return "peer-local";
     },
     getConnectedPeers() {
       return [];
@@ -58,18 +69,7 @@ function makeMesh(calls: string[]): MeshNetwork {
     },
     async dial() {},
     getInstanceIdentity() {
-      return {
-        id: "local-instance",
-        name: "local",
-        pubkey: "local-pubkey",
-        binding: "local-binding",
-        bindingComponents: {
-          username: "user",
-          hostname: "host",
-          platform: "test",
-        },
-        createdAt: 1,
-      };
+      return undefined;
     },
     getNATStatus() {
       return {
@@ -88,29 +88,17 @@ function makeMesh(calls: string[]): MeshNetwork {
   };
 }
 
-function makeRouter(calls: string[]): InstanceRouter {
+function createRouterStub(): InstanceRouter {
   return {
-    attachHandlers() {
-      calls.push("router.attachHandlers");
-    },
-    async announceToConnectedPeers() {
-      calls.push("router.announceToConnectedPeers");
-    },
-    async start() {
-      calls.push("router.start");
-    },
-    async stop() {
-      calls.push("router.stop");
-    },
-    async handleMessage() {},
+    attachHandlers() {},
+    async announceToConnectedPeers() {},
+    async start() {},
+    async stop() {},
+    async handleMessage(_msg: P2PMessage) {},
     async announceToPeer() {},
-    enablePublicAttributeRefresh() {
-      calls.push("router.enablePublicAttributeRefresh");
-    },
-    async refreshPublicAttributes() {
-      calls.push("router.refreshPublicAttributes");
-    },
-    async listInstances() {
+    enablePublicAttributeRefresh() {},
+    async refreshPublicAttributes() {},
+    async listInstances(): Promise<InstancePeerRecord[]> {
       return [];
     },
     async resolveInstance() {
@@ -124,8 +112,13 @@ function makeRouter(calls: string[]): InstanceRouter {
         toPeerId: "",
       };
     },
-    async sendUserAttributeMessage() {
+    async sendUserAttributeMessage(
+      _match: UserAttributeMatch,
+      _message: string,
+      _options?: UserAttributeMessageOptions,
+    ): Promise<UserAttributeMessageResult> {
       return {
+        scope: "public",
         matched: 0,
         sent: 0,
         delivered: 0,
@@ -135,206 +128,152 @@ function makeRouter(calls: string[]): InstanceRouter {
   };
 }
 
-function makeApi(calls: string[]) {
-  const services: ServiceRegistration[] = [];
-  const infoLogs: string[] = [];
-
-  const api = {
-    id: "libp2p-mesh",
-    name: "libp2p-mesh",
-    source: "test",
-    registrationMode: "full",
+function createApi(pluginConfig?: MeshConfig): OpenClawPluginApi {
+  return {
+    pluginConfig,
     config: {},
-    pluginConfig: {},
-    logger: {
-      debug() {},
-      info(message: string) {
-        infoLogs.push(message);
-      },
-      warn() {},
-      error() {},
-    },
-    runtime: {
-      config: {
-        current: () => ({}),
-        async mutateConfigFile() {
-          return { result: undefined, nextConfig: {} };
-        },
-      },
-      channel: {
-        outbound: {
-          loadAdapter() {
-            return undefined;
-          },
-        },
-      },
-    },
-    registerCli() {},
-    registerService(service: ServiceRegistration) {
-      services.push(service);
-    },
+    runtime: {},
+    logger: {},
+    registerService() {},
     registerChannel() {},
     registerTool() {},
     registerHook() {},
-  };
-
-  return { api: api as never, services, infoLogs, calls };
+    registerCli() {},
+  } as unknown as OpenClawPluginApi;
 }
 
-test("service registers router and inbound handlers before mesh startup", async () => {
-  const calls: string[] = [];
-  const { api, services, infoLogs } = makeApi(calls);
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+}
 
-  registerLibp2pMeshWithDeps(api, {
-    createMeshNetwork: () => makeMesh(calls),
-    createInstanceRouter: () => makeRouter(calls),
+test("registerLibp2pMeshWithDeps passes defaulted config to mesh and router when pluginConfig is undefined", async () => {
+  const { registerLibp2pMeshWithDeps } = await loadPlugin();
+  const mesh = createMeshStub();
+  let meshConfig: MeshConfig | undefined;
+  let routerConfig: MeshConfig | undefined;
+
+  registerLibp2pMeshWithDeps(createApi(undefined), {
+    createMeshNetwork(options) {
+      meshConfig = options.config;
+      return mesh;
+    },
+    createInstanceRouter(options: InstanceRouterOptions) {
+      routerConfig = options.config;
+      return createRouterStub();
+    },
+    async autoInstallAgentPrompt() {},
   });
 
-  assert.equal(services.length, 1);
-  await services[0].start();
-
-  assert.deepEqual(calls.slice(0, 4), [
-    "router.attachHandlers",
-    "inbound.attach",
-    "mesh.start",
-    "router.start",
-  ]);
-  assert.ok(
-    infoLogs.some((message) => message.includes("Direct message from remote-peer")),
-    "expected direct inbound handler to receive messages during mesh.start",
-  );
-
-  await services[0].start();
-  assert.equal(
-    calls.filter((call) => call === "router.attachHandlers").length,
-    1,
-    "duplicate service start should not attach router handlers again",
-  );
-  assert.equal(
-    calls.filter((call) => call === "inbound.attach").length,
-    1,
-    "duplicate service start should not attach inbound handler again",
-  );
-
-  await services[0].stop();
-  assert.ok(calls.includes("inbound.unsubscribe"));
-  assert.ok(calls.includes("router.stop"));
-  assert.ok(calls.includes("mesh.stop"));
+  assert.deepEqual(meshConfig, {
+    discovery: "mdns",
+    enableNATTraversal: true,
+    enableDHT: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+  });
+  assert.deepEqual(routerConfig, meshConfig);
 });
 
-test("service enables queued public attribute refresh after startup delay", async () => {
-  const calls: string[] = [];
-  const { api, services } = makeApi(calls);
-  api.pluginConfig = { publicAttributeRefreshStartupDelayMs: 0 };
+test("registerLibp2pMeshWithDeps preserves explicit config while filling missing defaults", async () => {
+  const { registerLibp2pMeshWithDeps } = await loadPlugin();
+  const mesh = createMeshStub();
+  const explicitConfig: MeshConfig = {
+    discovery: "bootstrap",
+    bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Example"],
+    enableNATTraversal: false,
+    inboundChannel: "telegram",
+    inboundTarget: "chat:123",
+  };
+  let meshConfig: MeshConfig | undefined;
+  let routerConfig: MeshConfig | undefined;
 
-  registerLibp2pMeshWithDeps(api, {
-    createMeshNetwork: () => makeMesh(calls),
-    createInstanceRouter: () => makeRouter(calls),
+  registerLibp2pMeshWithDeps(createApi(explicitConfig), {
+    createMeshNetwork(options) {
+      meshConfig = options.config;
+      return mesh;
+    },
+    createInstanceRouter(options: InstanceRouterOptions) {
+      routerConfig = options.config;
+      return createRouterStub();
+    },
+    async autoInstallAgentPrompt() {},
   });
 
-  await services[0].start();
-  assert.equal(calls.includes("router.enablePublicAttributeRefresh"), false);
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  assert.equal(calls.includes("router.enablePublicAttributeRefresh"), true);
-  await services[0].stop();
+  assert.deepEqual(meshConfig, {
+    discovery: "bootstrap",
+    enableNATTraversal: false,
+    enableDHT: true,
+    deliveryAckTimeoutMs: DEFAULT_DELIVERY_ACK_TIMEOUT_MS,
+    bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Example"],
+    inboundChannel: "telegram",
+    inboundTarget: "chat:123",
+  });
+  assert.deepEqual(routerConfig, meshConfig);
 });
 
-test("service cleans inbound handlers after mesh startup failure before retry", async () => {
-  const calls: string[] = [];
-  const { api, services } = makeApi(calls);
-  let startAttempts = 0;
+test("registerLibp2pMeshWithDeps starts automatic prompt installation without awaiting it and passes api.logger", async () => {
+  const { registerLibp2pMeshWithDeps } = await loadPlugin();
+  const logger = { info() {}, warn() {} };
+  let promptStarted = false;
+  let promptLogger: unknown;
+  let resolvePrompt: (() => void) | undefined;
 
-  registerLibp2pMeshWithDeps(api, {
-    createMeshNetwork: () => ({
-      ...makeMesh(calls),
-      async start() {
-        calls.push("mesh.start");
-        startAttempts++;
-        if (startAttempts === 1) {
-          throw new Error("startup failed");
-        }
+  registerLibp2pMeshWithDeps(
+    {
+      ...createApi(undefined),
+      logger,
+    } as OpenClawPluginApi,
+    {
+      createMeshNetwork() {
+        return createMeshStub();
       },
-    }),
-    createInstanceRouter: () => makeRouter(calls),
-  });
-
-  assert.equal(services.length, 1);
-  await assert.rejects(services[0].start(), /startup failed/);
-  assert.deepEqual(calls.slice(0, 5), [
-    "router.attachHandlers",
-    "inbound.attach",
-    "mesh.start",
-    "inbound.unsubscribe",
-    "router.stop",
-  ]);
-
-  await services[0].start();
-  assert.equal(
-    calls.filter((call) => call === "inbound.attach").length,
-    2,
-    "retry after failed startup should attach one fresh inbound handler",
-  );
-  assert.equal(
-    calls.filter((call) => call === "inbound.unsubscribe").length,
-    1,
-    "failed startup should clean the stale inbound handler before retry",
+      createInstanceRouter() {
+        return createRouterStub();
+      },
+      autoInstallAgentPrompt(options) {
+        promptStarted = true;
+        promptLogger = options?.logger;
+        return new Promise<void>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      },
+    },
   );
 
-  await services[0].stop();
-  assert.equal(
-    calls.filter((call) => call === "inbound.unsubscribe").length,
-    2,
-    "stop should clean the active inbound handler from the successful retry",
-  );
+  assert.equal(promptStarted, true);
+  assert.equal(promptLogger, logger);
+  resolvePrompt?.();
 });
 
-test("concurrent service starts share one startup and handler registration", async () => {
-  const calls: string[] = [];
-  const { api, services } = makeApi(calls);
-  let releaseStart!: () => void;
-  const startGate = new Promise<void>((resolve) => {
-    releaseStart = resolve;
-  });
+test("registerLibp2pMeshWithDeps catches rejecting automatic prompt installation and safely warns", async () => {
+  const { registerLibp2pMeshWithDeps } = await loadPlugin();
+  const warnings: string[] = [];
 
-  registerLibp2pMeshWithDeps(api, {
-    createMeshNetwork: () => ({
-      ...makeMesh(calls),
-      async start() {
-        calls.push("mesh.start");
-        await startGate;
+  registerLibp2pMeshWithDeps(
+    {
+      ...createApi(undefined),
+      logger: {
+        warn(message) {
+          warnings.push(message);
+          throw new Error("logger unavailable");
+        },
       },
-    }),
-    createInstanceRouter: () => makeRouter(calls),
-  });
-
-  assert.equal(services.length, 1);
-  const firstStart = services[0].start();
-  const secondStart = services[0].start();
-  releaseStart();
-  await Promise.all([firstStart, secondStart]);
-
-  assert.equal(
-    calls.filter((call) => call === "router.attachHandlers").length,
-    1,
-    "concurrent starts should attach router handlers once",
-  );
-  assert.equal(
-    calls.filter((call) => call === "inbound.attach").length,
-    1,
-    "concurrent starts should attach inbound handlers once",
-  );
-  assert.equal(
-    calls.filter((call) => call === "mesh.start").length,
-    1,
-    "concurrent starts should share one mesh startup",
-  );
-  assert.equal(
-    calls.filter((call) => call === "router.start").length,
-    1,
-    "concurrent starts should run router startup once after mesh startup",
+    } as OpenClawPluginApi,
+    {
+      createMeshNetwork() {
+        return createMeshStub();
+      },
+      createInstanceRouter() {
+        return createRouterStub();
+      },
+      async autoInstallAgentPrompt() {
+        throw new Error("prompt failed");
+      },
+    },
   );
 
-  await services[0].stop();
+  await flushMicrotasks();
+
+  assert.deepEqual(warnings, [
+    "[libp2p-mesh] Failed to auto-install agent prompt: Error: prompt failed",
+  ]);
 });

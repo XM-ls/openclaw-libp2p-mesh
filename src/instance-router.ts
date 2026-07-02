@@ -9,7 +9,6 @@ import type {
   LocalPeerLabelAttribute,
   MeshConfig,
   P2PMessage,
-  PeerLabelsFile,
   UserAttributeMatch,
   UserAttributeMessageOptions,
   UserAttributeMatchScope,
@@ -105,18 +104,6 @@ function matchesLocalPeerLabel(
     normalizeAttributeKey(attribute.key) === normalizeAttributeKey(match.key) &&
     normalizeAttributeValue(attribute.value) === normalizeAttributeValue(match.value)
   );
-}
-
-function rawPeerLabelsToLocalAttributes(
-  labels: PeerLabelsFile["peers"][string]["labels"] | undefined,
-): LocalPeerLabelAttribute[] {
-  return (labels ?? []).map((label) => ({
-    kind: "structured",
-    key: label.key,
-    value: label.value,
-    label: label.value,
-    source: "local",
-  }));
 }
 
 function buildUserAttributeTarget(
@@ -240,54 +227,6 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
       throw new Error("Local instance identity is not initialized");
     }
     return identity.id;
-  }
-
-  async function buildLocalLabelsByInstance(): Promise<
-    Record<string, LocalPeerLabelAttribute[]>
-  > {
-    const table = await store.load();
-    const instanceIds = Object.keys(table.instances);
-    const result: Record<string, LocalPeerLabelAttribute[]> = {};
-
-    if (options.peerLabelStore?.load) {
-      const labelsFile = await options.peerLabelStore.load();
-      for (const instanceId of new Set([
-        ...instanceIds,
-        ...Object.keys(labelsFile.peers),
-      ])) {
-        result[instanceId] = rawPeerLabelsToLocalAttributes(
-          labelsFile.peers[instanceId]?.labels,
-        );
-      }
-      return result;
-    }
-
-    for (const instanceId of instanceIds) {
-      result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
-    }
-
-    const currentTable = await store.load();
-    for (const instanceId of Object.keys(currentTable.instances)) {
-      if (instanceId in result) {
-        continue;
-      }
-      result[instanceId] = (await options.peerLabelStore?.listLabels(instanceId)) ?? [];
-    }
-
-    return result;
-  }
-
-  async function syncAllLocalLabelSnapshots(): Promise<void> {
-    if (!options.peerLabelStore) return;
-    await store.syncLocalLabels(await buildLocalLabelsByInstance());
-  }
-
-  async function syncLocalLabelSnapshot(instanceId: string): Promise<void> {
-    if (!options.peerLabelStore) return;
-    await store.updateLocalLabels(
-      instanceId,
-      await options.peerLabelStore.listLabels(instanceId),
-    );
   }
 
   async function loadUserPublicAttributes(loadOptions?: {
@@ -527,13 +466,6 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
     }
 
     const result = await store.upsertFromAnnounce(payload);
-    if (options.peerLabelStore) {
-      await syncLocalLabelSnapshot(payload.instanceId).catch((error) => {
-        logger?.warn?.(
-          `[libp2p-mesh] Failed to sync local labels for ${payload.instanceId}: ${summarizeError(error)}`,
-        );
-      });
-    }
     if (result.changed) {
       logger?.info?.(
         `[libp2p-mesh] Instance mapping updated: ${payload.instanceId} -> ${payload.peerId}`,
@@ -758,11 +690,6 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
 
   async function start(): Promise<void> {
     attachHandlers();
-    await syncAllLocalLabelSnapshots().catch((error) => {
-      logger?.warn?.(
-        `[libp2p-mesh] Failed to sync local labels on startup: ${summarizeError(error)}`,
-      );
-    });
     await announceToConnectedPeers();
   }
 
@@ -881,16 +808,12 @@ export function createInstanceRouter(options: InstanceRouterOptions): InstanceRo
           : record.userPublicAttributes?.find((attribute) =>
               matchesUserAttribute(attribute, match),
             );
-      let localAttribute: LocalPeerLabelAttribute | undefined;
-      if (scope !== "public") {
-        const labels =
-          record.localLabels !== undefined
-            ? record.localLabels
-            : (await options.peerLabelStore?.listLabels(record.instanceId)) ?? [];
-        localAttribute = labels.find((attribute) =>
-          matchesLocalPeerLabel(attribute, match),
-        );
-      }
+      const localAttribute =
+        scope === "public"
+          ? undefined
+          : (await options.peerLabelStore?.listLabels(record.instanceId))?.find((attribute) =>
+              matchesLocalPeerLabel(attribute, match),
+            );
 
       if (publicAttribute && localAttribute && scope === "all") {
         targets.push(buildUserAttributeTarget(record, publicAttribute, "all"));
