@@ -123,11 +123,11 @@ async function runFirstConfigFlow(options: RunSetupWizardOptions): Promise<MeshC
   const mode = await selectSetupMode(options.prompter);
   let pluginConfig = await buildNetworkConfigFromPrompts(mode, options.prompter);
 
-  const inboundChoice = await options.prompter.select("Configure inbound delivery targets?", [
-    { label: "Sync from configured channels", value: "sync-from-channels" },
-    { label: "Add one or more targets", value: "add-targets" },
-    { label: "Disable inbound delivery for now", value: "disable-inbound" },
-    { label: "Skip for now", value: "skip-inbound" },
+  const inboundChoice = await options.prompter.select("Configure where received P2P messages should appear?", [
+    { label: "Sync from existing channels", value: "sync-from-channels" },
+    { label: "Add a target manually", value: "add-targets" },
+    { label: "Do not receive P2P messages in local channels", value: "disable-inbound" },
+    { label: "Leave unchanged for now", value: "skip-inbound" },
   ]);
 
   switch (inboundChoice) {
@@ -157,8 +157,8 @@ async function runExistingConfigFlow(
     options.prompter.print(formatCurrentConfig(pluginConfig));
     const editChoice = await options.prompter.select("What do you want to edit?", [
       { label: "Sync inbound targets from channels", value: "sync-from-channels" },
-      { label: "Network mode", value: "network-mode" },
-      { label: "Inbound delivery targets", value: "inbound-targets" },
+      { label: "Network setup", value: "network-mode" },
+      { label: "Where received P2P messages appear", value: "inbound-targets" },
       { label: "Preview and apply", value: "preview-apply" },
       { label: "Cancel", value: "cancel" },
     ]);
@@ -230,7 +230,7 @@ async function syncInboundTargetsFromConfiguredChannels(
   const skipped: string[] = [];
 
   for (const channel of plan.missingChannels) {
-    const target = (await options.prompter.input(`Target for ${channel} (leave empty to skip)`, { required: false })).trim();
+    const target = (await options.prompter.input(`${targetPromptForChannel(channel)} (leave empty to skip)`, { required: false })).trim();
     if (!target) {
       skipped.push(channel);
       continue;
@@ -366,7 +366,7 @@ async function promptForInboundTargets(
 
   while (action === "add-target") {
     const channel = await promptForChannel(options);
-    const target = await options.prompter.input("Target", { required: true });
+    const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
     const addResult = addInboundTarget(targets, { channel, target });
 
     if (addResult.ok) {
@@ -427,7 +427,7 @@ async function promptForOneInboundTarget(
   options: RunSetupWizardOptions,
 ): Promise<InboundTargetConfig[]> {
   const channel = await promptForChannel(options);
-  const target = await options.prompter.input("Target", { required: true });
+  const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
   const addResult = addInboundTarget(targets, { channel, target });
 
   if (addResult.ok) {
@@ -449,7 +449,7 @@ async function promptForInboundTargetEdit(
 
   const selectedIndex = await selectInboundTargetIndex(options.prompter, "Target to edit", targets);
   const channel = await promptForChannel(options);
-  const target = await options.prompter.input("Target", { required: true });
+  const target = await options.prompter.input(targetPromptForChannel(channel), { required: true });
   const duplicate = targets.some(
     (existingTarget, index) => index !== selectedIndex && existingTarget.channel === channel && existingTarget.target === target,
   );
@@ -525,6 +525,10 @@ async function promptForChannel(options: RunSetupWizardOptions): Promise<string>
   }
 
   return channel;
+}
+
+function targetPromptForChannel(channel: string): string {
+  return `Target for ${channel}`;
 }
 
 function formatCurrentConfig(pluginConfig: MeshConfig): string {

@@ -2,6 +2,153 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runSetupWizard } from "../src/setup-wizard.js";
 
+test("runSetupWizard first-run inbound setup uses receive-message wording", async () => {
+  const selections = ["lan", "skip-inbound"];
+  let sawInboundSetupPrompt = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {},
+    prompter: {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+
+        if (message === "Configure where received P2P messages should appear?") {
+          sawInboundSetupPrompt = true;
+          assert.deepEqual(
+            choices.map((choice) => choice.label),
+            [
+              "Sync from existing channels",
+              "Add a target manually",
+              "Do not receive P2P messages in local channels",
+              "Leave unchanged for now",
+            ],
+          );
+          assert.deepEqual(
+            choices.map((choice) => choice.value),
+            ["sync-from-channels", "add-targets", "disable-inbound", "skip-inbound"],
+          );
+        }
+
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input() {
+        assert.fail("LAN setup and skipped inbound setup should not prompt for input");
+      },
+      print() {},
+    },
+    writer: {
+      async write() {},
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sawInboundSetupPrompt, true);
+});
+
+test("runSetupWizard existing config edit menu uses setup and received-message wording", async () => {
+  let sawEditMenu = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        assert.equal(message, "What do you want to edit?");
+        sawEditMenu = true;
+        assert.deepEqual(
+          choices.map((choice) => choice.label),
+          [
+            "Sync inbound targets from channels",
+            "Network setup",
+            "Where received P2P messages appear",
+            "Preview and apply",
+            "Cancel",
+          ],
+        );
+        assert.deepEqual(
+          choices.map((choice) => choice.value),
+          ["sync-from-channels", "network-mode", "inbound-targets", "preview-apply", "cancel"],
+        );
+        return "preview-apply";
+      },
+      async input() {
+        assert.fail("Previewing existing config should not prompt for input");
+      },
+      print() {},
+    },
+    writer: {
+      async write() {},
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sawEditMenu, true);
+});
+
+test("runSetupWizard manual inbound target prompt includes selected channel name", async () => {
+  const selections = ["lan", "add-targets", "feishu", "finish-targets"];
+  let sawTargetPrompt = false;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      channels: {
+        feishu: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.equal(message, "Target for feishu");
+        assert.equal(options?.required, true);
+        sawTargetPrompt = true;
+        return "user:ou_xxx";
+      },
+      print() {},
+    },
+    writer: {
+      async write() {},
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sawTargetPrompt, true);
+});
+
 test("runSetupWizard syncs missing inbound targets from configured channels without overwriting existing ones", async () => {
   const prints: string[] = [];
   const inputs = ["chat:123456"];
