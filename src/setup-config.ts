@@ -178,16 +178,19 @@ export function planInboundTargetSync(
 ): InboundTargetSyncPlan {
   const targets: InboundTargetConfig[] = [];
   const missingChannels: string[] = [];
-  const seenChannels = new Set<string>();
+  const seenTargetKeys = new Set<string>();
+  const coveredChannels = new Set<string>();
 
   for (const target of existingTargets) {
     const channel = typeof target.channel === "string" ? target.channel.trim() : "";
     const inboundTarget = typeof target.target === "string" ? target.target.trim() : "";
-    if (!channel || !inboundTarget || seenChannels.has(channel)) {
+    const targetKey = `${channel}\u0000${inboundTarget}`;
+    if (!channel || !inboundTarget || seenTargetKeys.has(targetKey)) {
       continue;
     }
 
-    seenChannels.add(channel);
+    seenTargetKeys.add(targetKey);
+    coveredChannels.add(channel);
     targets.push({
       ...target,
       channel,
@@ -197,11 +200,11 @@ export function planInboundTargetSync(
 
   for (const configuredChannel of configuredChannels) {
     const channel = typeof configuredChannel === "string" ? configuredChannel.trim() : "";
-    if (!channel || channel === LIBP2P_MESH_PLUGIN_ID || seenChannels.has(channel)) {
+    if (!channel || channel === LIBP2P_MESH_PLUGIN_ID || coveredChannels.has(channel)) {
       continue;
     }
 
-    seenChannels.add(channel);
+    coveredChannels.add(channel);
     missingChannels.push(channel);
   }
 

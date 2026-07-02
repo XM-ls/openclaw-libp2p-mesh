@@ -140,11 +140,12 @@ test("planInboundTargetSync preserves existing targets and reports missing chann
   assert.deepEqual(result.missingChannels, ["telegram", "qqbot"]);
 });
 
-test("planInboundTargetSync ignores duplicate existing channel targets and libp2p-mesh", () => {
+test("planInboundTargetSync preserves multiple same-channel targets and ignores exact duplicates", () => {
   const result = planInboundTargetSync(
     [
-      { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
-      { id: "feishu-duplicate", channel: "feishu", target: "user:ou_ignored" },
+      { id: "feishu-main", channel: " feishu ", target: " user:ou_xxx " },
+      { id: "feishu-duplicate", channel: "feishu", target: "user:ou_xxx" },
+      { id: "feishu-backup", channel: "feishu", target: "user:ou_backup" },
       { id: "telegram-main", channel: "telegram", target: "chat:123456" },
     ],
     ["libp2p-mesh", "feishu", "telegram"],
@@ -152,7 +153,21 @@ test("planInboundTargetSync ignores duplicate existing channel targets and libp2
 
   assert.deepEqual(result.targets, [
     { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+    { id: "feishu-backup", channel: "feishu", target: "user:ou_backup" },
     { id: "telegram-main", channel: "telegram", target: "chat:123456" },
   ]);
   assert.deepEqual(result.missingChannels, []);
+});
+
+test("planInboundTargetSync reports channels with only invalid existing targets as missing", () => {
+  const result = planInboundTargetSync(
+    [
+      { id: "feishu-blank-target", channel: "feishu", target: " " },
+      { id: "blank-channel", channel: " ", target: "user:ou_xxx" },
+    ],
+    ["feishu"],
+  );
+
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.missingChannels, ["feishu"]);
 });
