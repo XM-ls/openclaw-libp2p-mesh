@@ -3,7 +3,8 @@ import test from "node:test";
 import { runSetupWizard } from "../src/setup-wizard.js";
 
 test("runSetupWizard first-run inbound setup uses receive-message wording", async () => {
-  const selections = ["lan", "skip-inbound"];
+  const inputs = ["", ""];
+  const selections = ["skip-inbound"];
   let sawInboundSetupPrompt = false;
 
   const result = await runSetupWizard({
@@ -17,6 +18,7 @@ test("runSetupWizard first-run inbound setup uses receive-message wording", asyn
         return true;
       },
       async select(message, choices) {
+        assert.notEqual(message, "Choose network setup:");
         const value = selections.shift();
         assert.ok(value);
 
@@ -40,8 +42,10 @@ test("runSetupWizard first-run inbound setup uses receive-message wording", asyn
         assert.ok(choices.some((choice) => choice.value === value));
         return value;
       },
-      async input() {
-        assert.fail("LAN setup and skipped inbound setup should not prompt for input");
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
       },
       print() {},
     },
@@ -52,6 +56,52 @@ test("runSetupWizard first-run inbound setup uses receive-message wording", asyn
 
   assert.equal(result.status, "applied");
   assert.equal(sawInboundSetupPrompt, true);
+});
+
+test("runSetupWizard first-run skips optional network entry addresses and does not write empty lists", async () => {
+  const inputs = ["", ""];
+  const selections = ["skip-inbound"];
+  let writtenConfig: any;
+  const prints: string[] = [];
+
+  const result = await runSetupWizard({
+    currentConfig: {},
+    prompter: {
+      async confirm(message) {
+        if (message === "Continue?") {
+          return true;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(message, choices) {
+        assert.notEqual(message, "Choose network setup:");
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^(Bootstrap|Relay) multiaddr/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.equal(pluginConfig.bootstrapList, undefined);
+  assert.equal(pluginConfig.relayList, undefined);
+  assert.match(prints.join("\n"), /Network discovery is enabled automatically/);
 });
 
 test("runSetupWizard existing config edit menu uses setup and received-message wording", async () => {
@@ -82,17 +132,17 @@ test("runSetupWizard existing config edit menu uses setup and received-message w
           choices.map((choice) => choice.label),
           [
             "Sync inbound targets from channels",
-            "Network setup",
+            "Network entry addresses",
+            "Public relay-node settings",
             "Where received P2P messages appear",
-            "Preview and apply",
             "Cancel",
           ],
         );
         assert.deepEqual(
           choices.map((choice) => choice.value),
-          ["sync-from-channels", "network-mode", "inbound-targets", "preview-apply", "cancel"],
+          ["sync-from-channels", "network-entry-addresses", "public-relay-node", "inbound-targets", "cancel"],
         );
-        return "preview-apply";
+        return "cancel";
       },
       async input() {
         assert.fail("Previewing existing config should not prompt for input");
@@ -104,12 +154,13 @@ test("runSetupWizard existing config edit menu uses setup and received-message w
     },
   });
 
-  assert.equal(result.status, "applied");
+  assert.equal(result.status, "cancelled");
   assert.equal(sawEditMenu, true);
 });
 
 test("runSetupWizard manual inbound target prompt includes selected channel name", async () => {
-  const selections = ["lan", "add-targets", "feishu", "finish-targets"];
+  const inputs = ["", "", "user:ou_xxx"];
+  const selections = ["add-targets", "feishu", "finish-targets"];
   let sawTargetPrompt = false;
 
   const result = await runSetupWizard({
@@ -130,13 +181,20 @@ test("runSetupWizard manual inbound target prompt includes selected channel name
         const value = selections.shift();
         assert.ok(value);
         assert.ok(choices.some((choice) => choice.value === value));
+        if (value === "finish-targets") {
+          assert.equal(choices.find((choice) => choice.value === "finish-targets")?.label, "Finish editing");
+        }
         return value;
       },
       async input(message, options) {
+        if (/^(Bootstrap|Relay) multiaddr/.test(message)) {
+          assert.equal(options?.required, false);
+          return inputs.shift() ?? "";
+        }
         assert.equal(message, "Target for feishu");
         assert.equal(options?.required, true);
         sawTargetPrompt = true;
-        return "user:ou_xxx";
+        return inputs.shift() ?? "";
       },
       print() {},
     },
@@ -152,7 +210,7 @@ test("runSetupWizard manual inbound target prompt includes selected channel name
 test("runSetupWizard syncs missing inbound targets from configured channels without overwriting existing ones", async () => {
   const prints: string[] = [];
   const inputs = ["chat:123456"];
-  const selections = ["sync-from-channels", "preview-apply"];
+  const selections = ["sync-from-channels"];
   let writtenConfig: unknown;
 
   const result = await runSetupWizard({
@@ -227,7 +285,7 @@ test("runSetupWizard syncs missing inbound targets from configured channels with
 test("runSetupWizard skips configured channels when sync target input is empty", async () => {
   const prints: string[] = [];
   const inputs = ["chat:123456", ""];
-  const selections = ["sync-from-channels", "preview-apply"];
+  const selections = ["sync-from-channels"];
   let writtenConfig: unknown;
 
   const result = await runSetupWizard({
@@ -311,7 +369,7 @@ test("runSetupWizard skips configured channels when sync target input is empty",
 test("runSetupWizard preserves existing inbound targets when all sync inputs are skipped", async () => {
   const prints: string[] = [];
   const inputs = ["", ""];
-  const selections = ["sync-from-channels", "preview-apply"];
+  const selections = ["sync-from-channels"];
   let writtenConfig: unknown;
 
   const result = await runSetupWizard({
@@ -388,9 +446,10 @@ test("runSetupWizard preserves existing inbound targets when all sync inputs are
   assert.match(output, /qqbot/);
 });
 
-test("runSetupWizard existing config network setup choices exclude tools-only", async () => {
-  const selections = ["network-mode", "lan", "preview-apply"];
-  let sawNetworkSetupPrompt = false;
+test("runSetupWizard keeps existing network entry addresses when inputs are empty", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = ["", ""];
+  let writtenConfig: any;
 
   const result = await runSetupWizard({
     currentConfig: {
@@ -399,7 +458,8 @@ test("runSetupWizard existing config network setup choices exclude tools-only", 
           "libp2p-mesh": {
             enabled: true,
             config: {
-              discovery: "mdns",
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay"],
             },
           },
         },
@@ -413,29 +473,190 @@ test("runSetupWizard existing config network setup choices exclude tools-only", 
       async select(message, choices) {
         const value = selections.shift();
         assert.ok(value);
-
-        if (message === "Choose network setup:") {
-          sawNetworkSetupPrompt = true;
-          assert.deepEqual(
-            choices.map((choice) => choice.value),
-            ["lan", "cross-network", "relay-node"],
-          );
-          assert.equal(choices.some((choice) => choice.value === "tools-only"), false);
-        }
-
+        assert.notEqual(message, "Choose network setup:");
         assert.ok(choices.some((choice) => choice.value === value));
         return value;
       },
-      async input() {
-        assert.fail("LAN network setup should not prompt for input");
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
       },
       print() {},
     },
     writer: {
-      async write() {},
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
     },
   });
 
   assert.equal(result.status, "applied");
-  assert.equal(sawNetworkSetupPrompt, true);
+  assert.deepEqual(writtenConfig.plugins.entries["libp2p-mesh"].config.bootstrapList, [
+    "/ip4/1.2.3.4/tcp/4001/p2p/12D3Bootstrap",
+  ]);
+  assert.deepEqual(writtenConfig.plugins.entries["libp2p-mesh"].config.relayList, [
+    "/ip4/5.6.7.8/tcp/4001/p2p/12D3Relay",
+  ]);
+});
+
+test("runSetupWizard replaces network entry addresses when new values are entered", async () => {
+  const selections = ["network-entry-addresses"];
+  const inputs = [
+    "/ip4/9.9.9.9/tcp/4001/p2p/12D3NewBootstrap",
+    "/ip4/8.8.8.8/tcp/4001/p2p/12D3NewRelay",
+  ];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              bootstrapList: ["/ip4/1.2.3.4/tcp/4001/p2p/12D3OldBootstrap"],
+              relayList: ["/ip4/5.6.7.8/tcp/4001/p2p/12D3OldRelay"],
+            },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Add another bootstrap?" || message === "Add another relay?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /leave empty to keep unchanged/);
+        assert.equal(options?.required, false);
+        return inputs.shift() ?? "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.bootstrapList, ["/ip4/9.9.9.9/tcp/4001/p2p/12D3NewBootstrap"]);
+  assert.deepEqual(pluginConfig.relayList, ["/ip4/8.8.8.8/tcp/4001/p2p/12D3NewRelay"]);
+  assert.equal(pluginConfig.discovery, undefined);
+});
+
+test("runSetupWizard can disable public relay-node settings", async () => {
+  const selections = ["public-relay-node"];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: { enableCircuitRelayServer: true },
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Enable this machine as a public relay node?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input() {
+        assert.fail("Disabling public relay node should not prompt for addresses");
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(writtenConfig.plugins.entries["libp2p-mesh"].config.enableCircuitRelayServer, false);
+});
+
+test("runSetupWizard enables public relay node with default listen address and optional announce", async () => {
+  const selections = ["public-relay-node"];
+  let writtenConfig: any;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {},
+          },
+        },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        if (message === "Enable this machine as a public relay node?") {
+          return true;
+        }
+        if (message === "Add another public announce address?") {
+          return false;
+        }
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        if (message === "Listen address") {
+          assert.equal(options?.defaultValue, "/ip4/0.0.0.0/tcp/4001");
+          assert.equal(options?.required, true);
+          return options.defaultValue;
+        }
+
+        assert.equal(message, "Public announce address (optional, leave empty to skip)");
+        assert.equal(options?.required, false);
+        return "";
+      },
+      print() {},
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  const pluginConfig = writtenConfig.plugins.entries["libp2p-mesh"].config;
+  assert.deepEqual(pluginConfig.listenAddrs, ["/ip4/0.0.0.0/tcp/4001"]);
+  assert.equal(pluginConfig.enableCircuitRelayServer, true);
+  assert.equal(pluginConfig.announceAddrs, undefined);
 });

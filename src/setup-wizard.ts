@@ -2,7 +2,8 @@ import type { InboundTargetConfig, MeshConfig } from "./types.js";
 import {
   addInboundTarget,
   applyPluginConfig,
-  buildNetworkConfig,
+  buildNetworkEntryConfig,
+  buildPublicRelayNodeConfig,
   disableInboundDelivery,
   getLibp2pMeshConfig,
   listConfiguredChannels,
@@ -11,7 +12,6 @@ import {
   migrateLegacyInboundConfig,
   setInboundTargets,
   type OpenClawConfigLike,
-  type SetupMode,
 } from "./setup-config.js";
 
 const MANUAL_CHANNEL_VALUE = "__manual__";
@@ -28,14 +28,12 @@ export class SetupCancelledError extends Error {
 export type SetupPromptChoice =
   | "continue"
   | "cancel"
-  | "lan"
-  | "cross-network"
-  | "relay-node"
   | "add-targets"
   | "sync-from-channels"
   | "disable-inbound"
   | "skip-inbound"
-  | "network-mode"
+  | "network-entry-addresses"
+  | "public-relay-node"
   | "inbound-targets"
   | "convert-legacy-inbound"
   | "keep-legacy-inbound"
@@ -43,8 +41,7 @@ export type SetupPromptChoice =
   | "add-target"
   | "edit-target"
   | "remove-target"
-  | "finish-targets"
-  | "preview-apply";
+  | "finish-targets";
 
 export type SetupPrompter = {
   confirm(message: string, defaultValue?: boolean): Promise<boolean>;
@@ -120,8 +117,10 @@ async function runFirstConfigFlow(options: RunSetupWizardOptions): Promise<MeshC
     return undefined;
   }
 
-  const mode = await selectSetupMode(options.prompter);
-  let pluginConfig = await buildNetworkConfigFromPrompts(mode, options.prompter);
+  options.prompter.print(
+    "Network discovery is enabled automatically.\nmDNS, DHT, NAT traversal, relay transport, and hole punching are enabled by default.",
+  );
+  let pluginConfig = await promptForNetworkEntryConfig({}, options.prompter, { keepExistingOnEmpty: false });
 
   const inboundChoice = await options.prompter.select("Configure where received P2P messages should appear?", [
     { label: "Sync from existing channels", value: "sync-from-channels" },
@@ -153,33 +152,26 @@ async function runExistingConfigFlow(
 ): Promise<MeshConfig | undefined> {
   let pluginConfig = cloneMeshConfig(existingConfig) ?? {};
 
-  while (true) {
-    options.prompter.print(formatCurrentConfig(pluginConfig));
-    const editChoice = await options.prompter.select("What do you want to edit?", [
-      { label: "Sync inbound targets from channels", value: "sync-from-channels" },
-      { label: "Network setup", value: "network-mode" },
-      { label: "Where received P2P messages appear", value: "inbound-targets" },
-      { label: "Preview and apply", value: "preview-apply" },
-      { label: "Cancel", value: "cancel" },
-    ]);
+  options.prompter.print(formatCurrentConfig(pluginConfig));
+  const editChoice = await options.prompter.select("What do you want to edit?", [
+    { label: "Sync inbound targets from channels", value: "sync-from-channels" },
+    { label: "Network entry addresses", value: "network-entry-addresses" },
+    { label: "Public relay-node settings", value: "public-relay-node" },
+    { label: "Where received P2P messages appear", value: "inbound-targets" },
+    { label: "Cancel", value: "cancel" },
+  ]);
 
-    switch (editChoice) {
-      case "sync-from-channels":
-        pluginConfig = await syncInboundTargetsFromConfiguredChannels(pluginConfig, options);
-        break;
-      case "network-mode": {
-        const mode = await selectSetupMode(options.prompter);
-        pluginConfig = mergeNetworkConfig(pluginConfig, await buildNetworkConfigFromPrompts(mode, options.prompter));
-        break;
-      }
-      case "inbound-targets":
-        pluginConfig = await promptForExistingInboundConfig(pluginConfig, options);
-        break;
-      case "preview-apply":
-        return pluginConfig;
-      case "cancel":
-        return undefined;
-    }
+  switch (editChoice) {
+    case "sync-from-channels":
+      return syncInboundTargetsFromConfiguredChannels(pluginConfig, options);
+    case "network-entry-addresses":
+      return promptForNetworkEntryConfig(pluginConfig, options.prompter, { keepExistingOnEmpty: true });
+    case "public-relay-node":
+      return promptForPublicRelayNodeConfig(pluginConfig, options.prompter);
+    case "inbound-targets":
+      return promptForExistingInboundConfig(pluginConfig, options);
+    case "cancel":
+      return undefined;
   }
 }
 
@@ -290,49 +282,60 @@ function hasLegacyOnlyInboundConfig(pluginConfig: MeshConfig): boolean {
   return Boolean(pluginConfig.inboundChannel && pluginConfig.inboundTarget && !Array.isArray(pluginConfig.inboundTargets));
 }
 
-async function selectSetupMode(prompter: SetupPrompter): Promise<SetupMode> {
-  return prompter.select("Choose network setup:", [
-    { label: "Use default LAN discovery", value: "lan" },
-    { label: "Add bootstrap / relay addresses for cross-network use", value: "cross-network" },
-    { label: "Configure this machine as a public relay node", value: "relay-node" },
-  ]);
-}
-
-async function buildNetworkConfigFromPrompts(mode: SetupMode, prompter: SetupPrompter): Promise<MeshConfig> {
-  switch (mode) {
-    case "cross-network":
-      return buildNetworkConfig("cross-network", {
-        crossNetwork: {
-          bootstrapList: await promptForAddressList(prompter, "Bootstrap multiaddr", "Add another bootstrap?"),
-          relayList: await promptForOptionalAddressList(
-            prompter,
-            "Relay multiaddr (optional, leave empty to skip)",
-            "Add another relay?",
-          ),
-        },
-      });
-    case "relay-node":
-      return buildNetworkConfig("relay-node", {
-        relayNode: {
-          listenAddrs: [await prompter.input("Listen address", { defaultValue: "/ip4/0.0.0.0/tcp/4001", required: true })],
-          announceAddrs: [await prompter.input("Public announce address", { required: true })],
-        },
-      });
-    default:
-      return buildNetworkConfig(mode);
-  }
-}
-
-async function promptForAddressList(
+async function promptForNetworkEntryConfig(
+  existing: MeshConfig,
   prompter: SetupPrompter,
-  message: string,
-  addAnotherMessage: string,
-): Promise<string[]> {
-  const addresses = [await prompter.input(message, { required: true })];
-  while (await prompter.confirm(addAnotherMessage, false)) {
-    addresses.push(await prompter.input(message, { required: true }));
+  options: { keepExistingOnEmpty: boolean },
+): Promise<MeshConfig> {
+  const bootstrapList = await promptForOptionalAddressList(
+    prompter,
+    options.keepExistingOnEmpty
+      ? "Bootstrap multiaddr (optional, leave empty to keep unchanged)"
+      : "Bootstrap multiaddr (optional, leave empty to skip)",
+    "Add another bootstrap?",
+  );
+  const relayList = await promptForOptionalAddressList(
+    prompter,
+    options.keepExistingOnEmpty
+      ? "Relay multiaddr (optional, leave empty to keep unchanged)"
+      : "Relay multiaddr (optional, leave empty to skip)",
+    "Add another relay?",
+  );
+
+  if (options.keepExistingOnEmpty) {
+    return {
+      ...existing,
+      ...(bootstrapList.length > 0 ? { bootstrapList } : {}),
+      ...(relayList.length > 0 ? { relayList } : {}),
+    };
   }
-  return addresses;
+
+  return {
+    ...existing,
+    ...buildNetworkEntryConfig({ bootstrapList, relayList }),
+  };
+}
+
+async function promptForPublicRelayNodeConfig(existing: MeshConfig, prompter: SetupPrompter): Promise<MeshConfig> {
+  const enabled = await prompter.confirm("Enable this machine as a public relay node?", false);
+  const relayConfig = enabled
+    ? buildPublicRelayNodeConfig({
+        enabled: true,
+        listenAddrs: [
+          await prompter.input("Listen address", {
+            defaultValue: "/ip4/0.0.0.0/tcp/4001",
+            required: true,
+          }),
+        ],
+        announceAddrs: await promptForOptionalAddressList(
+          prompter,
+          "Public announce address (optional, leave empty to skip)",
+          "Add another public announce address?",
+        ),
+      })
+    : buildPublicRelayNodeConfig({ enabled: false });
+
+  return mergeNetworkConfig(existing, relayConfig);
 }
 
 async function promptForOptionalAddressList(
@@ -340,7 +343,7 @@ async function promptForOptionalAddressList(
   message: string,
   addAnotherMessage: string,
 ): Promise<string[]> {
-  const firstAddress = await prompter.input(message);
+  const firstAddress = await prompter.input(message, { required: false });
   if (!firstAddress) {
     return [];
   }
@@ -360,7 +363,7 @@ async function promptForInboundTargets(
   let action: "add-target" | "finish-targets" = promptOptions?.promptInitialAction
     ? await options.prompter.select("What do you want to do?", [
         { label: "Add target", value: "add-target" },
-        { label: "Back", value: "finish-targets" },
+        { label: "Finish editing", value: "finish-targets" },
       ])
     : "add-target";
 
@@ -378,7 +381,7 @@ async function promptForInboundTargets(
 
     action = await options.prompter.select("Add another target?", [
       { label: "Add another", value: "add-target" },
-      { label: "Finish target setup", value: "finish-targets" },
+      { label: "Finish editing", value: "finish-targets" },
     ]);
   }
 
@@ -401,7 +404,7 @@ async function promptForInboundTargetEdits(
       { label: "Edit target", value: "edit-target" },
       { label: "Remove target", value: "remove-target" },
       { label: "Disable inbound delivery", value: "disable-inbound" },
-      { label: "Back", value: "finish-targets" },
+      { label: "Finish editing", value: "finish-targets" },
     ]);
 
     switch (action) {
