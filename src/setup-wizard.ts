@@ -225,18 +225,66 @@ async function syncInboundTargetsFromConfiguredChannels(
     return setInboundTargets(pluginConfig, plan.targets);
   }
 
+  options.prompter.print(formatInboundSyncPlan(plan));
   let targets = plan.targets.map((target) => ({ ...target }));
+  const added: InboundTargetConfig[] = [];
+  const skipped: string[] = [];
+
   for (const channel of plan.missingChannels) {
-    const target = await options.prompter.input(`Target for ${channel}`, { required: true });
+    const target = (await options.prompter.input(`Target for ${channel} (leave empty to skip)`, { required: false })).trim();
+    if (!target) {
+      skipped.push(channel);
+      continue;
+    }
+
     const addResult = addInboundTarget(targets, { channel, target });
     if (!addResult.ok) {
       options.prompter.print(addResult.error);
       continue;
     }
     targets = addResult.targets;
+    added.push(addResult.added);
   }
 
+  options.prompter.print(formatInboundSyncResult({ added, skipped }));
   return setInboundTargets(pluginConfig, targets);
+}
+
+function formatInboundSyncPlan(plan: { targets: InboundTargetConfig[]; missingChannels: string[] }): string {
+  const alreadyConfigured =
+    plan.targets.length > 0 ? plan.targets.map((target) => `  - ${formatInboundTargetLine(target)}`) : ["  none"];
+  const missingChannels =
+    plan.missingChannels.length > 0 ? plan.missingChannels.map((channel) => `  - ${channel}`) : ["  none"];
+
+  return [
+    "Already configured:",
+    ...alreadyConfigured,
+    "",
+    "Channels without inbound targets:",
+    ...missingChannels,
+    "",
+    "Leave a target empty to skip that channel.",
+  ].join("\n");
+}
+
+function formatInboundSyncResult(result: { added: InboundTargetConfig[]; skipped: string[] }): string {
+  const lines: string[] = [];
+
+  if (result.added.length > 0) {
+    lines.push("Added:", ...result.added.map((target) => `  - ${formatInboundTargetLine(target)}`));
+  } else {
+    lines.push("No inbound targets were added.");
+  }
+
+  if (result.skipped.length > 0) {
+    lines.push("", "Skipped:", ...result.skipped.map((channel) => `  - ${channel}`));
+  }
+
+  return lines.join("\n");
+}
+
+function formatInboundTargetLine(target: InboundTargetConfig): string {
+  return `${target.id ?? "(unnamed)"}     ${target.channel} / ${target.target}`;
 }
 
 function hasLegacyOnlyInboundConfig(pluginConfig: MeshConfig): boolean {

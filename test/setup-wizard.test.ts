@@ -38,8 +38,8 @@ test("runSetupWizard syncs missing inbound targets from configured channels with
         return value;
       },
       async input(message, options) {
-        assert.equal(message, "Target for telegram");
-        assert.equal(options?.required, true);
+        assert.equal(message, "Target for telegram (leave empty to skip)");
+        assert.equal(options?.required, false);
         const value = inputs.shift();
         assert.ok(value);
         return value;
@@ -75,4 +75,168 @@ test("runSetupWizard syncs missing inbound targets from configured channels with
     { id: "telegram-main", channel: "telegram", target: "chat:123456" },
   ]);
   assert.match(prints.join("\n"), /Current libp2p-mesh config:/);
+});
+
+test("runSetupWizard skips configured channels when sync target input is empty", async () => {
+  const prints: string[] = [];
+  const inputs = ["chat:123456", ""];
+  const selections = ["sync-from-channels", "preview-apply"];
+  let writtenConfig: unknown;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+        qqbot: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^Target for (telegram|qqbot) \(leave empty to skip\)$/);
+        assert.equal(options?.required, false);
+        const value = inputs.shift();
+        assert.notEqual(value, undefined);
+        return value ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.ok(writtenConfig);
+
+  const nextConfig = writtenConfig as {
+    plugins?: {
+      entries?: {
+        "libp2p-mesh"?: {
+          config?: {
+            inboundTargets?: Array<{ id?: string; channel: string; target: string }>;
+          };
+        };
+      };
+    };
+  };
+
+  assert.deepEqual(nextConfig.plugins?.entries?.["libp2p-mesh"]?.config?.inboundTargets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+    { id: "telegram-main", channel: "telegram", target: "chat:123456" },
+  ]);
+
+  const output = prints.join("\n");
+  assert.match(output, /Already configured:/);
+  assert.match(output, /Channels without inbound targets:/);
+  assert.match(output, /Leave a target empty to skip that channel\./);
+  assert.match(output, /Added:/);
+  assert.match(output, /telegram-main     telegram \/ chat:123456/);
+  assert.match(output, /Skipped:/);
+  assert.match(output, /qqbot/);
+});
+
+test("runSetupWizard preserves existing inbound targets when all sync inputs are skipped", async () => {
+  const prints: string[] = [];
+  const inputs = ["", ""];
+  const selections = ["sync-from-channels", "preview-apply"];
+  let writtenConfig: unknown;
+
+  const result = await runSetupWizard({
+    currentConfig: {
+      plugins: {
+        entries: {
+          "libp2p-mesh": {
+            enabled: true,
+            config: {
+              discovery: "mdns",
+              inboundTargets: [{ id: "feishu-main", channel: "feishu", target: "user:ou_xxx" }],
+            },
+          },
+        },
+      },
+      channels: {
+        feishu: { enabled: true },
+        telegram: { enabled: true },
+        qqbot: { enabled: true },
+      },
+    },
+    prompter: {
+      async confirm(message) {
+        assert.equal(message, "Apply this config?");
+        return true;
+      },
+      async select(_message, choices) {
+        const value = selections.shift();
+        assert.ok(value);
+        assert.ok(choices.some((choice) => choice.value === value));
+        return value;
+      },
+      async input(message, options) {
+        assert.match(message, /^Target for (telegram|qqbot) \(leave empty to skip\)$/);
+        assert.equal(options?.required, false);
+        const value = inputs.shift();
+        assert.notEqual(value, undefined);
+        return value ?? "";
+      },
+      print(message) {
+        prints.push(message);
+      },
+    },
+    writer: {
+      async write(nextConfig) {
+        writtenConfig = nextConfig;
+      },
+    },
+  });
+
+  assert.equal(result.status, "applied");
+  assert.ok(writtenConfig);
+
+  const nextConfig = writtenConfig as {
+    plugins?: {
+      entries?: {
+        "libp2p-mesh"?: {
+          config?: {
+            inboundTargets?: Array<{ id?: string; channel: string; target: string }>;
+          };
+        };
+      };
+    };
+  };
+
+  assert.deepEqual(nextConfig.plugins?.entries?.["libp2p-mesh"]?.config?.inboundTargets, [
+    { id: "feishu-main", channel: "feishu", target: "user:ou_xxx" },
+  ]);
+
+  const output = prints.join("\n");
+  assert.match(output, /No inbound targets were added\./);
+  assert.match(output, /Skipped:/);
+  assert.match(output, /telegram/);
+  assert.match(output, /qqbot/);
 });
